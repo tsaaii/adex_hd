@@ -53,9 +53,51 @@ class WeighbridgeManager:
         # FAST: Pre-compile only the colon pattern
         self.colon_pattern = re.compile(r':(\d+)')
         
+        # ADD THESE LINES - Custom regex pattern support
+        self.custom_regex_pattern = None
+        self.use_custom_pattern = False
+        
         # Register signal handlers for graceful shutdown
         self._register_signal_handlers()
-    
+
+    def update_regex_pattern(self, pattern_string):
+        """Update the custom regex pattern for weight parsing
+        
+        Args:
+            pattern_string: Regex pattern string (e.g., r'(\\d+\\.?\\d*)')
+        """
+        try:
+            if pattern_string and pattern_string.strip():
+                # Compile the pattern to validate it
+                compiled_pattern = re.compile(pattern_string)
+                self.custom_regex_pattern = compiled_pattern
+                self.use_custom_pattern = True
+                self.logger.print_success(f"Custom regex pattern updated: {pattern_string}")
+            else:
+                # Disable custom pattern if empty
+                self.custom_regex_pattern = None
+                self.use_custom_pattern = False
+                self.logger.print_info("Custom regex pattern disabled")
+        except re.error as e:
+            self.logger.print_error(f"Invalid regex pattern '{pattern_string}': {e}")
+            self.use_custom_pattern = False
+
+
+    def load_settings_and_apply_regex(self, settings_storage):
+        """Load regex pattern from settings and apply it
+        
+        Args:
+            settings_storage: SettingsStorage instance
+        """
+        try:
+            wb_settings = settings_storage.get_weighbridge_settings()
+            regex_pattern = wb_settings.get("regex_pattern", "")
+            if regex_pattern:
+                self.update_regex_pattern(regex_pattern)
+                self.logger.print_info(f"Loaded regex pattern from settings: {regex_pattern}")
+        except Exception as e:
+            self.logger.print_error(f"Error loading regex pattern from settings: {e}")
+
     def setup_logging(self):
         """Minimal logging setup for compatibility"""
         try:
@@ -112,17 +154,117 @@ class WeighbridgeManager:
         except Exception as e:
             return []
     
-    def connect(self, port, baud_rate=9600, data_bits=8, parity="None", stop_bits=1.0):
-        """Connect to weighbridge - maintains original interface signature"""
+    def _parse_weight(self, data_line):
+        """Parse weight from received data with custom regex pattern support
+        
+        Args:
+            data_line: Raw data string from weighbridge
+            
+        Returns:
+            float: Parsed weight in kg, or None if parsing failed
+        """
         try:
-            # Validate parameters - REQUIRED for compatibility
+            # FIRST: Try custom regex pattern if enabled
+            if self.use_custom_pattern and self.custom_regex_pattern:
+                match = self.custom_regex_pattern.search(data_line)
+                if match:
+                    # Get the first non-None group
+                    for group in match.groups():
+                        if group:
+                            weight = float(group)
+                            self.logger.print_debug(f"Parsed weight: {weight} kg using custom pattern")
+                            return weight
+            
+            # FALLBACK: Use pre-compiled pattern if available
+            if self.weight_pattern:
+                match = self.weight_pattern.search(data_line)
+                if match:
+                    # Get the first non-None group
+                    for group in match.groups():
+                        if group:
+                            weight = float(group)
+                            self.logger.print_debug(f"Parsed weight: {weight} kg using compiled pattern")
+                            return weight
+            
+            # FALLBACK: Use individual patterns as before
+            # Check for the new "Wt:" format first (e.g., "1600Wt:    1500Wt:    1500Wt:")
+            wt_pattern = r'^(\d{2,5})[^0-9]+.*Wt:$'
+            wt_matches = re.findall(wt_pattern, data_line)
+            
+            if wt_matches:
+                # Found weights in "NumberWt:" format
+                weights = [int(match) for match in wt_matches]
+                weight = weights[0]
+                self.logger.print_debug(f"Selected weight from Wt: format: {weight} kg")
+                return float(weight)
+            
+            # Common weight patterns from different weighbridge models (existing patterns)
+            patterns = [
+                r'(\d+\.?\d*)\s*kg',  # "1234.5 kg" or "1234 kg"
+                r'(\d+\.?\d*)\s*KG',  # "1234.5 KG"
+                r'(\d+\.?\d*)',       # Just the number
+                r'.*?(\d+\.?\d*)\s*$',# Number at end of string
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, data_line)
+                if match:
+                    weight_str = match.group(1)
+                    weight = float(weight_str)
+                    self.logger.print_debug(f"Parsed weight: {weight} kg from fallback pattern: {pattern}")
+                    return weight
+            
+            self.logger.print_warning(f"No weight pattern matched for data: '{data_line}'")
+            return None
+            
+        except ValueError as e:
+            self.logger.print_warning(f"Could not convert weight to float: {e}")
+            return None
+        except Exception as e:
+            self.logger.print_error(f"Error parsing weight: {e}")
+            return None
+
+
+    def connect(self, port, baud_rate=9600, data_bits=8, parity='None', stop_bits=1.0, settings_storage=None):
+        """Connect to weighbridge with comprehensive logging and parameter validation
+        
+        Args:
+            port: COM port (e.g., 'COM1')
+            baud_rate: Baud rate (default 9600)
+            data_bits: Data bits (default 8)
+            parity: Parity setting (default 'None')
+            stop_bits: Stop bits (default 1.0)
+            settings_storage: SettingsStorage instance to load regex pattern (optional)
+            
+        Returns:
+            bool: True if connection successful
+        """
+        self.connection_attempts += 1
+        
+        try:
+            self.logger.print_info(f"Connection attempt #{self.connection_attempts} to weighbridge")
+            self.logger.print_debug(f"Parameters: Port={port}, Baud={baud_rate}, Data={data_bits}, Parity={parity}, Stop={stop_bits}")
+            
+            # Load and apply regex pattern from settings if available
+            if settings_storage:
+                self.load_settings_and_apply_regex(settings_storage)
+            
+            # Validate parameters first
             is_valid, error_msg = self._validate_serial_parameters(port, baud_rate, data_bits, parity, stop_bits)
             if not is_valid:
-                self.logger.print_error(error_msg)
+                self.logger.print_error(f"Parameter validation failed: {error_msg}")
                 return False
             
-            # Close existing connection
+            if self.test_mode:
+                self.logger.print_warning("Test mode enabled - simulating weighbridge connection")
+                self.is_connected = True
+                self._start_test_mode_thread()
+                self.logger.print_success("Test mode weighbridge connection established")
+                return True
+            
+            # Close existing connection if open
             if self.serial_connection and self.serial_connection.is_open:
+                self.logger.print_info("Closing existing connection")
                 self.serial_connection.close()
                 time.sleep(0.1)
             
@@ -165,8 +307,10 @@ class WeighbridgeManager:
                 self.connection_attempts = 0
                 self.last_successful_read = datetime.datetime.now()
                 
+                self.logger.print_success(f"Connected to weighbridge on {port}")
                 return True
             else:
+                self.logger.print_error(f"Failed to open connection to {port}")
                 return False
             
         except Exception as e:

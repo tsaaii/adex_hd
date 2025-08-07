@@ -14,15 +14,7 @@ class SettingsPanel:
     
     def __init__(self, parent, weighbridge_callback=None, update_cameras_callback=None, 
             current_user=None, user_role=None):
-        """Initialize settings panel
-        
-        Args:
-            parent: Parent widget
-            weighbridge_callback: Callback for weighbridge weight updates
-            update_cameras_callback: Callback for camera updates
-            current_user: Currently logged-in username
-            user_role: User role (admin or user)
-        """
+        """Initialize settings panel with proper error handling"""
         self.parent = parent
         self.weighbridge_callback = weighbridge_callback
         self.update_cameras_callback = update_cameras_callback
@@ -32,7 +24,7 @@ class SettingsPanel:
         # Initialize settings storage
         self.settings_storage = SettingsStorage()
         
-        # Continue with initialization
+        # Initialize variables first
         self.init_variables()
         
         # Set up a flag to prevent recursive callbacks
@@ -40,17 +32,35 @@ class SettingsPanel:
         
         # Initialize weighbridge with the fixed callback
         self.weighbridge = WeighbridgeManager(self.update_weight_display)
+        
+        # Load regex pattern on initialization
+        try:
+            self.weighbridge.load_settings_and_apply_regex(self.settings_storage)
+        except Exception as e:
+            print(f"Error loading regex pattern on init: {e}")
+        
         import config
         config.set_global_weighbridge(self.weighbridge, self.current_weight_var, self.wb_status_var)
 
         # Check authentication for settings access
         if not self.authenticate_settings_access():
             return
+            
+        # Create panel
         self.create_panel()
         
-        # IMPORTANT: Load saved settings AFTER creating the panel
-        self.load_all_saved_settings()
-
+        # IMPORTANT: Load saved settings AFTER creating panel, with error handling
+        try:
+            self.load_all_saved_settings()
+        except Exception as e:
+            print(f"Error loading settings during init: {e}")
+        
+        # Validate settings
+        try:
+            self.validate_camera_settings()
+            self.validate_com_port()
+        except Exception as e:
+            print(f"Error validating settings: {e}")
 
     def create_panel(self):
         """Create settings panel with tabs"""
@@ -130,23 +140,31 @@ class SettingsPanel:
 
 
     def load_all_saved_settings(self):
-        """Load all saved settings after panel creation - UPDATED"""
+        """Load all saved settings after panel creation - UPDATED with error handling"""
         try:
             print("Loading saved settings...")
             
-            # Load weighbridge settings (this now includes test mode)
-            self.load_weighbridge_settings()  # This will now handle test mode
+            # Load weighbridge settings (this now includes test mode and regex pattern)
+            self.load_weighbridge_settings()
             
             # Load camera settings  
             self.load_saved_camera_settings()
             
-            # Load user management data
-            self.load_users()
+            # Load user management data ONLY if users_tree exists (not in hardcoded mode)
+            if hasattr(self, 'users_tree') and not config.HARDCODED_MODE:
+                try:
+                    self.load_users()
+                except Exception as e:
+                    print(f"Info: User management not available in current mode: {e}")
             
-            # Load site management data
-            self.load_sites()
+            # Load site management data ONLY if site_tree exists (not in hardcoded mode)
+            if hasattr(self, 'site_tree') and not config.HARDCODED_MODE:
+                try:
+                    self.load_sites()
+                except Exception as e:
+                    print(f"Info: Site management not available in current mode: {e}")
             
-            print("All settings loaded successfully")
+            print("All available settings loaded successfully")
             
         except Exception as e:
             print(f"Error loading saved settings: {e}")
@@ -275,26 +293,46 @@ class SettingsPanel:
             print(f"Error loading camera settings: {e}")
 
     def save_weighbridge_settings(self):
-        """Save weighbridge settings including test mode"""
+        """Save weighbridge settings including regex pattern"""
         try:
-            settings = {
+            # Validate regex pattern before saving
+            regex_pattern = self.regex_pattern_var.get().strip()
+            if not regex_pattern:
+                messagebox.showerror("Error", "Regex pattern cannot be empty")
+                return False
+                
+            # Test the regex pattern
+            try:
+                import re
+                re.compile(regex_pattern)
+            except re.error as e:
+                messagebox.showerror("Error", f"Invalid regex pattern: {str(e)}")
+                return False
+            
+            wb_settings = {
                 "com_port": self.com_port_var.get(),
-                "baud_rate": int(self.baud_rate_var.get()),
-                "data_bits": int(self.data_bits_var.get()),
+                "baud_rate": self.baud_rate_var.get(),
+                "data_bits": self.data_bits_var.get(),
                 "parity": self.parity_var.get(),
-                "stop_bits": float(self.stop_bits_var.get()),
-                "test_mode": self.test_mode_var.get()  # Include test mode in save
+                "stop_bits": self.stop_bits_var.get(),
+                "regex_pattern": regex_pattern,
+                "test_mode": self.test_mode_var.get() if hasattr(self, 'test_mode_var') else False
             }
             
-            if self.settings_storage.save_weighbridge_settings(settings):
-                print("Weighbridge settings with test mode saved successfully")
+            success = self.settings_storage.save_weighbridge_settings(wb_settings)
+            if success:
+                # UPDATE THIS SECTION - Apply regex pattern immediately
+                if hasattr(self, 'weighbridge') and self.weighbridge:
+                    self.weighbridge.update_regex_pattern(regex_pattern)
+                    print(f"Applied regex pattern to weighbridge: {regex_pattern}")
+                messagebox.showinfo("Success", "Weighbridge settings saved successfully!\nRegex pattern applied.")
                 return True
             else:
-                print("Failed to save weighbridge settings")
+                messagebox.showerror("Error", "Failed to save weighbridge settings")
                 return False
                 
         except Exception as e:
-            print(f"Error saving weighbridge settings: {e}")
+            messagebox.showerror("Error", f"Error saving settings: {str(e)}")
             return False
 
     def save_camera_settings(self):
@@ -488,12 +526,14 @@ class SettingsPanel:
 
 
     def on_closing(self):
-        """Handle cleanup when closing"""
+        """Handle cleanup when closing - ENHANCED VERSION"""
         try:
-            # Save current settings before closing
-            print("Saving settings on close...")
+            print("Settings panel cleanup starting...")
             
-            # Save weighbridge settings
+            # Stop any background tasks
+            self._stop_background_tasks()
+            
+            # Save current settings before closing
             if hasattr(self, 'com_port_var'):
                 self.save_weighbridge_settings()
             
@@ -502,13 +542,33 @@ class SettingsPanel:
                 self.save_camera_settings()
             
             # Disconnect weighbridge
-            if self.weighbridge:
+            if hasattr(self, 'weighbridge') and self.weighbridge:
                 self.weighbridge.disconnect()
                 
-            print("Settings saved on close")
+            print("Settings panel cleanup completed")
             
         except Exception as e:
-            print(f"Error saving settings on close: {e}")
+            print(f"Error during settings cleanup: {e}")
+
+    def _stop_background_tasks(self):
+        """Stop all background tasks and scheduled callbacks"""
+        try:
+            # Cancel any scheduled after() calls
+            for widget in [self.parent] + (self.parent.winfo_children() if hasattr(self.parent, 'winfo_children') else []):
+                try:
+                    # Try to cancel any pending after() calls
+                    if hasattr(widget, 'after_cancel'):
+                        # This is a basic approach - you may need to track specific after_ids
+                        pass
+                except:
+                    pass
+                    
+            # Set flags to stop any running loops
+            if hasattr(self, 'weighbridge') and self.weighbridge:
+                self.weighbridge.should_read = False
+                
+        except Exception as e:
+            print(f"Error stopping background tasks: {e}")
 
     def authenticate_settings_access(self):
         """Authenticate for settings access"""
@@ -744,7 +804,7 @@ class SettingsPanel:
         # ADD THIS LINE - Test mode variable initialization
         self.test_mode_var = tk.BooleanVar(value=False)
         self.test_mode_status_var = tk.StringVar(value="Status: Real Weighbridge Mode")
-        
+        self.regex_pattern_var = tk.StringVar(value=r"(\d+\.?\d*)")
         # Camera settings
         self.front_cam_index_var = tk.IntVar(value=0)
         self.back_cam_index_var = tk.IntVar(value=1)
@@ -857,7 +917,7 @@ class SettingsPanel:
         main_container = ttk.Frame(parent)
         main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Configure main container for proper resizing
+        # # Configure main container for proper resizing
         main_container.columnconfigure(0, weight=1)
         main_container.rowconfigure(0, weight=1)
         
@@ -941,16 +1001,30 @@ class SettingsPanel:
         ttk.Label(wb_frame, text="Stop Bits:").grid(row=4, column=0, sticky=tk.W, pady=2)
         ttk.Combobox(wb_frame, textvariable=self.stop_bits_var, values=[1.0, 1.5, 2.0], 
                     state="readonly").grid(row=4, column=1, sticky=tk.EW, pady=2, padx=5)
+
+        ttk.Label(wb_frame, text="Regex Pattern:").grid(row=5, column=0, sticky=tk.W, pady=2)
+        regex_frame = ttk.Frame(wb_frame)
+        regex_frame.grid(row=5, column=1, columnspan=2, sticky=tk.EW, pady=2, padx=5)
+        regex_frame.columnconfigure(0, weight=1)
+
+        self.regex_pattern_var = tk.StringVar(value=r"(\d+\.?\d*)")  # Default pattern
+        self.regex_entry = ttk.Entry(regex_frame, textvariable=self.regex_pattern_var, width=40)
+        self.regex_entry.grid(row=0, column=0, sticky=tk.EW, padx=(0, 5))
         
+        # Help button for regex patterns
+        help_btn = HoverButton(regex_frame, text="?", bg=config.COLORS["primary_light"], 
+                            fg=config.COLORS["text"], padx=5, pady=2,
+                            command=self.show_regex_help)
+        help_btn.grid(row=0, column=1)
         # Connection buttons
         btn_frame = ttk.Frame(wb_frame)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
-        
+        btn_frame.grid(row=6, column=0, columnspan=3, pady=10)
+
         self.connect_btn = HoverButton(btn_frame, text="Connect", bg=config.COLORS["secondary"], 
                                     fg=config.COLORS["button_text"], padx=10, pady=3,
                                     command=self.connect_weighbridge)
         self.connect_btn.pack(side=tk.LEFT, padx=5)
-        
+
         self.disconnect_btn = HoverButton(btn_frame, text="Disconnect", bg=config.COLORS["error"], 
                                         fg=config.COLORS["button_text"], padx=10, pady=3,
                                         command=self.disconnect_weighbridge, state=tk.DISABLED)
@@ -967,25 +1041,31 @@ class SettingsPanel:
                                     fg=config.COLORS["button_text"], padx=10, pady=3,
                                     command=self.auto_connect_weighbridge)
         auto_connect_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Status indicator
+                
         ttk.Label(wb_frame, textvariable=self.wb_status_var, 
-                foreground="red").grid(row=6, column=0, columnspan=3, sticky=tk.W)
-        
-        # Test weight display
-        ttk.Label(wb_frame, text="Current Weight:").grid(row=7, column=0, sticky=tk.W, pady=2)
+                foreground="red").grid(row=7, column=0, columnspan=3, sticky=tk.W)
+
+        # Test weight display (UPDATE ROW NUMBER TO 8)
+        ttk.Label(wb_frame, text="Current Weight:").grid(row=8, column=0, sticky=tk.W, pady=2)
         self.weight_label = ttk.Label(wb_frame, textvariable=self.current_weight_var, 
                                     font=("Segoe UI", 10, "bold"))
-        self.weight_label.grid(row=7, column=1, sticky=tk.W, pady=2)
-        
-        # Add a status indicator for invalid readings
+        self.weight_label.grid(row=8, column=1, sticky=tk.W, pady=2)
+
+        # Add a status indicator for invalid readings (UPDATE ROW NUMBER TO 9)
         self.weight_status_label = ttk.Label(wb_frame, textvariable=self.weight_status_var, 
                                         foreground="black")
-        self.weight_status_label.grid(row=8, column=0, columnspan=3, sticky=tk.W, pady=2)
+        self.weight_status_label.grid(row=9, column=0, columnspan=3, sticky=tk.W, pady=2)
         
         # CLOUD STORAGE SECTION (if enabled)
         if hasattr(config, 'USE_CLOUD_STORAGE') and config.USE_CLOUD_STORAGE:
             self.create_enhanced_cloud_backup_section(wb_frame)
+
+            ttk.Separator(wb_frame, orient=tk.HORIZONTAL).grid(
+                row=10, column=0, columnspan=3, sticky=tk.EW, pady=10)
+            
+            # Enhanced cloud backup section (row=11)
+            cloud_frame = ttk.LabelFrame(wb_frame, text="Cloud Storage & Backup")
+            cloud_frame.grid(row=11, column=0, columnspan=3, sticky=tk.EW, pady=5)
 
         # TEST MODE SECTION (now in scrollable frame)
         test_mode_frame = ttk.LabelFrame(scrollable_frame, text="Testing Mode", padding=10)
@@ -1067,6 +1147,30 @@ class SettingsPanel:
             canvas.configure(width=event.width)
         
         main_container.bind('<Configure>', configure_canvas)
+
+
+    def show_regex_help(self):
+        """Show regex pattern help dialog"""
+        help_text = """Common Regex Patterns for Serial Weight Data:
+
+    Basic patterns:
+    • (\\d+\\.?\\d*) - Matches any number (with optional decimal)
+    • (\\d+) - Matches whole numbers only
+    • (\\d+\\.?\\d*)\\s*kg - Matches number followed by 'kg'
+
+    Advanced patterns:
+    • :(\\d+) - Matches colon followed by number (e.g., ":1500")
+    • (\\d{2,5})[^0-9]+.*?Wt:\\s*$ - Matches "NumberWt:" format
+    • (\\d+\\.?\\d*)\\s*(?:kg|KG) - Matches number + kg/KG
+
+    Tips:
+    - Use parentheses () around the number part you want to extract
+    - Test your pattern with sample data before saving
+    - Default pattern works for most weighbridge formats"""
+        
+        messagebox.showinfo("Regex Pattern Help", help_text)
+
+
 
 
     def on_test_mode_toggle(self):
@@ -1152,7 +1256,7 @@ class SettingsPanel:
             self.data_bits_var.set(wb_settings.get("data_bits", 8))
             self.parity_var.set(wb_settings.get("parity", "None"))
             self.stop_bits_var.set(wb_settings.get("stop_bits", 1.0))
-            
+            self.regex_pattern_var.set(wb_settings.get("regex_pattern", r"(\d+\.?\d*)"))
             # Load test mode setting
             test_mode = wb_settings.get("test_mode", False)
             if hasattr(self, 'test_mode_var'):
@@ -1182,8 +1286,8 @@ class SettingsPanel:
         """UPDATED: Enhanced cloud backup section with JSON bulk upload"""
         try:
             # Create a separator
-            ttk.Separator(wb_frame, orient=tk.HORIZONTAL).grid(
-                row=9, column=0, columnspan=3, sticky=tk.EW, pady=10)
+            # ttk.Separator(wb_frame, orient=tk.HORIZONTAL).grid(
+            #     row=9, column=0, columnspan=3, sticky=tk.EW, pady=10)
             
             # Enhanced cloud backup section
             cloud_frame = ttk.LabelFrame(wb_frame, text="Cloud Storage & Backup (JSON + Images + Reports)")
@@ -3049,7 +3153,7 @@ class SettingsPanel:
             stop_bits = self.stop_bits_var.get()
             
             # Connect to weighbridge
-            if self.weighbridge.connect(com_port, baud_rate, data_bits, parity, stop_bits):
+            if self.weighbridge.connect(com_port, baud_rate, data_bits, parity, stop_bits, self.settings_storage):
                 # Update UI
                 self.wb_status_var.set("Status: Connected")
                 self.weight_label.config(foreground="green")

@@ -308,10 +308,10 @@ class SettingsStorage:
             return False
 
     def get_weighbridge_settings(self):
-        """Get weighbridge settings from file including test mode
+        """Get weighbridge settings from file including test mode and regex pattern
         
         Returns:
-            dict: Weighbridge settings with test_mode flag
+            dict: Weighbridge settings with test_mode flag and regex_pattern
         """
         try:
             print(f"Reading weighbridge settings from: {self.settings_file}")
@@ -322,9 +322,13 @@ class SettingsStorage:
                 # Add test_mode if it doesn't exist
                 if "test_mode" not in wb_settings:
                     wb_settings["test_mode"] = False
+                
+                # ADD THIS - Add regex_pattern if it doesn't exist
+                if "regex_pattern" not in wb_settings:
+                    wb_settings["regex_pattern"] = r"(\d+\.?\d*)"  # Default pattern
                     
-                print(f"Loaded weighbridge settings: {wb_settings}")
-                return wb_settings
+            print(f"Loaded weighbridge settings: {wb_settings}")
+            return wb_settings
         except Exception as e:
             print(f"Error reading weighbridge settings: {e}")
             return {
@@ -333,14 +337,16 @@ class SettingsStorage:
                 "data_bits": 8,
                 "parity": "None",
                 "stop_bits": 1.0,
-                "test_mode": False  # Default to real weighbridge mode
+                "test_mode": False,  # Default to real weighbridge mode
+                "regex_pattern": r"(\d+\.?\d*)"  # ADD THIS - Default regex pattern
             }
+
         
     def save_weighbridge_settings(self, settings):
-        """Save weighbridge settings to file
+        """Save weighbridge settings to file including regex_pattern
         
         Args:
-            settings: Weighbridge settings dict
+            settings: Weighbridge settings dict (should now include regex_pattern)
             
         Returns:
             bool: True if successful, False otherwise
@@ -356,7 +362,7 @@ class SettingsStorage:
             else:
                 all_settings = {}
             
-            # Update weighbridge section
+            # Update weighbridge section (this will include regex_pattern)
             all_settings["weighbridge"] = settings
             
             # Ensure directory exists
