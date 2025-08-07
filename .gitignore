@@ -1,0 +1,11 @@
+__pycache__/*
+
+build/*
+
+dist/*
+
+adex_hd/*
+
+logs/*
+
+data/
