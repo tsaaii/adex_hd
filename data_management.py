@@ -27,26 +27,18 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
     print("ReportLab not available - PDF auto-generation will be disabled")
 
-# Set up logging
+
+
 def setup_logging():
-    """Set up logging directory and configuration"""
-    logs_dir = config.LOGS_FOLDER
-    os.makedirs(logs_dir, exist_ok=True)
-    
-    # Create log filename with current date
-    log_filename = os.path.join(logs_dir, f"weighbridge_{datetime.datetime.now().strftime('%Y-%m-%d')}.log")
-    
-    # Configure logging
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_filename, encoding='utf-8'),
-            logging.StreamHandler()  # Also log to console
-        ]
-    )
-    
-    return logging.getLogger('DataManager')
+    """Use the existing unified logging system that already handles Unicode"""
+    try:
+        from unified_logging import setup_enhanced_logger
+        return setup_enhanced_logger("DataManager", config.LOGS_FOLDER).logger
+    except:
+        # Fallback that won't crash
+        logger = logging.getLogger('DataManager')
+        logger.addHandler(logging.NullHandler())  # Prevent logging errors
+        return logger
 
 
 class DataManager:
@@ -147,7 +139,7 @@ class DataManager:
                     csv_success = self.add_new_record(data)
                 
                 if csv_success:
-                    self.logger.info(f"✅ Record {ticket_no} saved to local CSV successfully")
+                    self.logger.info(f" Record {ticket_no} saved to local CSV successfully")
                 else:
                     self.logger.error(f"❌ Failed to save record {ticket_no} to local CSV")
                     return {'success': False, 'error': 'Failed to save to CSV'}
@@ -182,7 +174,7 @@ class DataManager:
                 try:
                     json_saved = self.save_json_backup_locally(data)
                     if json_saved:
-                        self.logger.info(f"✅ JSON backup saved locally for {ticket_no}")
+                        self.logger.info(f" JSON backup saved locally for {ticket_no}")
                     else:
                         self.logger.warning(f"⚠️ Failed to save JSON backup for {ticket_no}")
                 except Exception as json_error:
@@ -202,28 +194,28 @@ class DataManager:
                     
                     pdf_generated, pdf_path = self.auto_generate_pdf_for_complete_record(data)
                     if pdf_generated:
-                        self.logger.info(f"✅ PDF auto-generated locally: {pdf_path}")
+                        self.logger.info(f" PDF auto-generated locally: {pdf_path}")
                     else:
                         self.logger.warning("⚠️ PDF generation failed, but record and JSON were saved locally")
                 except Exception as pdf_error:
                     self.logger.error(f"⚠️ PDF generation error (non-critical): {pdf_error}")
             
             # IMPORTANT: NO CLOUD STORAGE ATTEMPTS HERE
-            self.logger.info("✅ OFFLINE-FIRST SAVE COMPLETED - Local CSV, JSON backup, and PDF generated")
+            self.logger.info(" OFFLINE-FIRST SAVE COMPLETED - Local CSV, JSON backup, and PDF generated")
             if todays_reports_folder:
-                self.logger.info(f"📂 PDF saved to today's reports folder: {todays_reports_folder}")
-            self.logger.info("💡 Cloud backup available via Settings > Cloud Storage > Backup")
+                self.logger.info(f"PDF saved to today's reports folder: {todays_reports_folder}")
+            self.logger.info(" Cloud backup available via Settings > Cloud Storage > Backup")
             self.logger.info("="*50)
 
             # FIXED: Check archive on EVERY complete record save (not random)
             if is_complete_record:
                 try:
-                    self.logger.info("🔍 Checking archive after complete record save...")
+                    self.logger.info(" Checking archive after complete record save...")
                     archive_success, archive_message = self.check_and_archive()
                     if archive_success:
-                        self.logger.info(f"📦 Archive completed: {archive_message}")
+                        self.logger.info(f" Archive completed: {archive_message}")
                     else:
-                        self.logger.info(f"📦 Archive check: {archive_message}")
+                        self.logger.info(f" Archive check: {archive_message}")
                 except Exception as archive_error:
                     self.logger.error(f"Archive check error (non-critical): {archive_error}")
             
@@ -479,7 +471,7 @@ class DataManager:
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(json_data, f, indent=4, ensure_ascii=False)
             
-            self.logger.info(f"✅ JSON backup saved: {json_path}")
+            self.logger.info(f" JSON backup saved: {json_path}")
             return True
             
         except Exception as e:
@@ -492,14 +484,14 @@ class DataManager:
     def check_and_archive(self):
         """Check if archive is due and perform it - IMPROVED"""
         try:
-            self.logger.info("🔍 Checking if archive is due...")
+            self.logger.info(" Checking if archive is due...")
             
             if self.should_archive_csv():
-                self.logger.info("📦 Archive is due - starting archive process...")
+                self.logger.info(" Archive is due - starting archive process...")
                 success, message = self.archive_complete_records()
                 
                 if success:
-                    self.logger.info(f"✅ Archive completed: {message}")
+                    self.logger.info(f" Archive completed: {message}")
                     # Optional: Show notification
                     try:
                         from tkinter import messagebox
@@ -507,15 +499,15 @@ class DataManager:
                     except:
                         pass  # Skip if no GUI
                 else:
-                    self.logger.warning(f"⚠️ Archive failed: {message}")
+                    self.logger.warning(f" Archive failed: {message}")
                     
                 return success, message
             else:
-                self.logger.info("⏳ Archive not due yet")
+                self.logger.info(" Archive not due yet")
                 return False, "Archive not due yet"
                 
         except Exception as e:
-            self.logger.error(f"❌ Error in archive check: {e}")
+            self.logger.error(f" Error in archive check: {e}")
             return False, f"Error: {e}"
 
 
@@ -662,9 +654,9 @@ class DataManager:
                         
                         should_archive = days_since >= 5
                         if should_archive:
-                            self.logger.info(f"✅ Archive DUE: {days_since} days >= 5 days")
+                            self.logger.info(f" Archive DUE: {days_since} days >= 5 days")
                         else:
-                            self.logger.info(f"⏳ Archive not due: {days_since} days < 5 days")
+                            self.logger.info(f" Archive not due: {days_since} days < 5 days")
                         return should_archive
                         
                 except Exception as tracking_error:
@@ -676,7 +668,7 @@ class DataManager:
                 # FIXED: No tracking file exists - this is the first run
                 # Don't archive on first run, just create the tracking file
                 self.logger.info(f"First run detected. CSV has {archivable_records} archivable records.")
-                self.logger.info("❌ Skipping archive on first run to prevent immediate archiving")
+                self.logger.info(" Skipping archive on first run to prevent immediate archiving")
                 
                 # Create tracking file with current date so archive will be due in 5 days
                 tracking_data = {
@@ -690,7 +682,7 @@ class DataManager:
                 with open(archive_tracking_file, 'w') as f:
                     json.dump(tracking_data, f, indent=2)
                 
-                self.logger.info("✅ Archive tracking file created - next archive will be due in 5 days")
+                self.logger.info(" Archive tracking file created - next archive will be due in 5 days")
                 return False
                     
         except Exception as e:
@@ -705,13 +697,13 @@ class DataManager:
             if not os.path.exists(current_file):
                 return False, "No CSV file to archive"
             
-            self.logger.info("🔍 Starting archive process...")
+            self.logger.info(" Starting archive process...")
             
             # Calculate cutoff date (2 days ago)
             cutoff_date = datetime.datetime.now() - datetime.timedelta(days=2)
             cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
             
-            self.logger.info(f"📅 Archive cutoff date: {cutoff_date_str} (records before this date will be archived)")
+            self.logger.info(f" Archive cutoff date: {cutoff_date_str} (records before this date will be archived)")
             
             # Read all records and categorize them
             archive_records = []        # Complete records from 2+ days ago
@@ -752,7 +744,7 @@ class DataManager:
                         elif not is_old_enough:
                             self.logger.info(f"KEEP: Ticket {ticket_no} - Date: {record_date} (Recent)")
             
-            self.logger.info(f"📊 Archive analysis:")
+            self.logger.info(f" Archive analysis:")
             self.logger.info(f"   Records to archive (complete + 2+ days old): {len(archive_records)}")
             self.logger.info(f"   Records to keep (recent or incomplete): {len(keep_records)}")
             
@@ -774,7 +766,7 @@ class DataManager:
                 for record in archive_records:
                     writer.writerow(record)
             
-            self.logger.info(f"📦 Created archive: {archive_filename}")
+            self.logger.info(f" Created archive: {archive_filename}")
             
             # Create fresh CSV with recent and incomplete records
             with open(current_file, 'w', newline='', encoding='utf-8') as f:
@@ -783,7 +775,7 @@ class DataManager:
                 for record in keep_records:
                     writer.writerow(record)
             
-            self.logger.info(f"🆕 Fresh CSV created with {len(keep_records)} records (recent + incomplete)")
+            self.logger.info(f" Fresh CSV created with {len(keep_records)} records (recent + incomplete)")
             
             # Update tracking file
             tracking_file = os.path.join(config.DATA_FOLDER, 'last_archive.json')
@@ -799,15 +791,15 @@ class DataManager:
             with open(tracking_file, 'w') as f:
                 json.dump(tracking_data, f, indent=2)
             
-            self.logger.info(f"✅ Archive completed successfully!")
-            self.logger.info(f"   📁 Archive file: {archive_filename}")
-            self.logger.info(f"   ✅ Records archived: {len(archive_records)} (complete + 2+ days old)")
-            self.logger.info(f"   ⏳ Records kept: {len(keep_records)} (recent or incomplete)")
+            self.logger.info(f" Archive completed successfully!")
+            self.logger.info(f"    Archive file: {archive_filename}")
+            self.logger.info(f"    Records archived: {len(archive_records)} (complete + 2+ days old)")
+            self.logger.info(f"    Records kept: {len(keep_records)} (recent or incomplete)")
             
             return True, f"Archive created: {len(archive_records)} records archived (before {cutoff_date_str}), {len(keep_records)} records kept."
             
         except Exception as e:
-            self.logger.error(f"❌ Archive error: {e}")
+            self.logger.error(f" Archive error: {e}")
             return False, f"Archive failed: {e}"
 
     # Continue with rest of the methods...
@@ -1392,7 +1384,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                         # Check if it was actually uploaded or skipped
                         # You can add logging here to distinguish between new upload and skipped duplicate
                         uploaded_count += 1
-                        self.logger.info(f"✅ Processed JSON backup: {os.path.basename(json_path)}")
+                        self.logger.info(f" Processed JSON backup: {os.path.basename(json_path)}")
                     else:
                         errors.append(f"Failed to upload {os.path.basename(json_path)}")
                             
@@ -1501,7 +1493,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 writer = csv.writer(csv_file)
                 writer.writerow(record)
             
-            self.logger.info(f"✅ New record added to {current_file}")
+            self.logger.info(f" New record added to {current_file}")
             return True
             
         except Exception as e:
@@ -1591,7 +1583,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 if os.path.exists(backup_file):
                     os.remove(backup_file)
                     
-                self.logger.info(f"✅ Record {ticket_no} updated in {current_file}")
+                self.logger.info(f" Record {ticket_no} updated in {current_file}")
                 return True
             except Exception as write_error:
                 self.logger.error(f"Error writing updated records: {write_error}")

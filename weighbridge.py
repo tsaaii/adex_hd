@@ -19,7 +19,7 @@ except ImportError:
 import config
 
 class WeighbridgeManager:
-    """Fast weighbridge manager - optimized for :XX pattern with full compatibility"""
+    """Fast weighbridge manager - optimized for custom patterns with full compatibility"""
     
     def __init__(self, weight_callback=None):
         """Initialize weighbridge manager - maintains original interface"""
@@ -53,7 +53,10 @@ class WeighbridgeManager:
         # FAST: Pre-compile only the colon pattern
         self.colon_pattern = re.compile(r':(\d+)')
         
-        # ADD THESE LINES - Custom regex pattern support
+        # FIXED: Initialize weight_pattern to None
+        self.weight_pattern = None
+        
+        # Custom regex pattern support
         self.custom_regex_pattern = None
         self.use_custom_pattern = False
         
@@ -64,7 +67,7 @@ class WeighbridgeManager:
         """Update the custom regex pattern for weight parsing
         
         Args:
-            pattern_string: Regex pattern string (e.g., r'(\\d+\\.?\\d*)')
+            pattern_string: Regex pattern string (e.g., r'☻\\s+(\\d+)♥')
         """
         try:
             if pattern_string and pattern_string.strip():
@@ -81,7 +84,6 @@ class WeighbridgeManager:
         except re.error as e:
             self.logger.print_error(f"Invalid regex pattern '{pattern_string}': {e}")
             self.use_custom_pattern = False
-
 
     def load_settings_and_apply_regex(self, settings_storage):
         """Load regex pattern from settings and apply it
@@ -155,7 +157,7 @@ class WeighbridgeManager:
             return []
     
     def _parse_weight(self, data_line):
-        """Parse weight from received data with custom regex pattern support
+        """FIXED: Parse weight from received data with custom regex pattern support
         
         Args:
             data_line: Raw data string from weighbridge
@@ -175,18 +177,7 @@ class WeighbridgeManager:
                             self.logger.print_debug(f"Parsed weight: {weight} kg using custom pattern")
                             return weight
             
-            # FALLBACK: Use pre-compiled pattern if available
-            if self.weight_pattern:
-                match = self.weight_pattern.search(data_line)
-                if match:
-                    # Get the first non-None group
-                    for group in match.groups():
-                        if group:
-                            weight = float(group)
-                            self.logger.print_debug(f"Parsed weight: {weight} kg using compiled pattern")
-                            return weight
-            
-            # FALLBACK: Use individual patterns as before
+            # FALLBACK: Use individual patterns directly
             # Check for the new "Wt:" format first (e.g., "1600Wt:    1500Wt:    1500Wt:")
             wt_pattern = r'^(\d{2,5})[^0-9]+.*Wt:$'
             wt_matches = re.findall(wt_pattern, data_line)
@@ -223,7 +214,6 @@ class WeighbridgeManager:
         except Exception as e:
             self.logger.print_error(f"Error parsing weight: {e}")
             return None
-
 
     def connect(self, port, baud_rate=9600, data_bits=8, parity='None', stop_bits=1.0, settings_storage=None):
         """Connect to weighbridge with comprehensive logging and parameter validation
@@ -278,14 +268,14 @@ class WeighbridgeManager:
             }
             parity_setting = parity_map.get(parity, serial.PARITY_NONE)
             
-            # FAST: Create serial connection with optimized settings
+            # Create serial connection with optimized settings
             self.serial_connection = serial.Serial(
                 port=port,
                 baudrate=baud_rate,
                 bytesize=data_bits,
                 parity=parity_setting,
                 stopbits=stop_bits,
-                timeout=0.02,  # FAST: Very short timeout
+                timeout=0.02,  # Very short timeout
                 write_timeout=1.0,
                 exclusive=True
             )
@@ -298,9 +288,9 @@ class WeighbridgeManager:
                 # Reset counters
                 self.consecutive_errors = 0
                 
-                # Start FAST reading thread
+                # Start reading thread
                 self.should_read = True
-                self.reading_thread = threading.Thread(target=self._fast_read_weight_loop, daemon=True)
+                self.reading_thread = threading.Thread(target=self._read_weight_loop, daemon=True)
                 self.reading_thread.start()
                 
                 self.is_connected = True
@@ -342,8 +332,18 @@ class WeighbridgeManager:
         except Exception as e:
             return False, f"Validation error: {e}"
     
-    def _fast_read_weight_loop(self):
-        """OPTIMIZED: Fast weight reading loop for colon pattern only"""
+    def _start_test_mode_thread(self):
+        """Start the test mode simulation thread"""
+        try:
+            self.should_read = True
+            self.reading_thread = threading.Thread(target=self._read_weight_loop, daemon=True)
+            self.reading_thread.start()
+            self.logger.print_debug("Test mode simulation thread started")
+        except Exception as e:
+            self.logger.print_error(f"Error starting test mode thread: {e}")
+    
+    def _read_weight_loop(self):
+        """FIXED: Weight reading loop that properly handles custom patterns"""
         while self.should_read:
             try:
                 if self.test_mode:
@@ -355,12 +355,12 @@ class WeighbridgeManager:
                 if self.serial_connection and self.serial_connection.is_open:
                     if self.serial_connection.in_waiting > 0:
                         try:
-                            # FAST: Quick read and decode
+                            # Quick read and decode
                             line = self.serial_connection.readline().decode('utf-8', errors='ignore').strip()
                             
                             if line:
-                                # FAST: Only check colon pattern
-                                weight = self._parse_colon_weight_fast(line)
+                                # FIXED: Use the full _parse_weight method that supports custom patterns
+                                weight = self._parse_weight(line)
                                 
                                 if weight is not None:
                                     self._process_weight(weight)
@@ -374,7 +374,7 @@ class WeighbridgeManager:
                             time.sleep(self.reconnect_delay)
                             continue
                 
-                # FAST: Minimal delay
+                # Minimal delay
                 time.sleep(0.005)  # 5ms delay for maximum speed
                 
             except Exception as e:
@@ -382,17 +382,6 @@ class WeighbridgeManager:
                 if self.consecutive_errors >= self.max_consecutive_errors:
                     break
                 time.sleep(0.01)
-    
-    def _parse_colon_weight_fast(self, data_line):
-        """OPTIMIZED: Fast parsing for colon pattern only"""
-        try:
-            # FAST: Only check colon pattern (:XX)
-            match = self.colon_pattern.search(data_line)
-            if match:
-                return float(match.group(1))
-            return None
-        except:
-            return None
     
     def _simulate_test_weight(self):
         """Test mode simulation - REQUIRED for compatibility"""

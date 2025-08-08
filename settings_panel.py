@@ -1125,7 +1125,7 @@ class SettingsPanel:
         help_frame = ttk.LabelFrame(scrollable_frame, text="Navigation Help", padding=10)
         help_frame.pack(fill=tk.X, padx=5, pady=(10, 20))
         
-        help_text = ("💡 Scroll Tips:\n"
+        help_text = (" Scroll Tips:\n"
                     "• Use mouse wheel to scroll up/down\n"
                     "• Use scrollbar on the right\n"
                     "• All settings are preserved when scrolling\n"
@@ -1357,7 +1357,7 @@ class SettingsPanel:
             self.backup_status_label.pack(side=tk.LEFT, padx=(5, 0))
             
             # Row 4: Information text
-            info_text = ("💡 JSONs are created locally for complete records (both weighments).\n"
+            info_text = (" JSONs are created locally for complete records (both weighments).\n"
                         "📤 Use 'Bulk Upload JSONs' for fast upload of all local JSONs.\n"
                         "📦 Use 'Full Backup' for comprehensive upload including reports.")
             info_label = ttk.Label(cloud_frame, text=info_text, 
@@ -1416,16 +1416,16 @@ class SettingsPanel:
                     total = results.get("total", 0)
                     
                     if uploaded > 0:
-                        status_msg = f"✅ Bulk upload successful! {uploaded}/{total} JSON backups uploaded"
+                        status_msg = f" Bulk upload successful! {uploaded}/{total} JSON backups uploaded"
                         self.backup_status_var.set(status_msg)
                         
                         # Show detailed results in popup
                         messagebox.showinfo("Bulk Upload Complete", 
                                         f"JSON Bulk Upload Results:\n\n"
-                                        f"✅ Successfully uploaded: {uploaded}/{total} files\n"
+                                        f" Successfully uploaded: {uploaded}/{total} files\n"
                                         f"📁 Local JSON backups processed\n"
                                         f"🌐 All complete records now in cloud\n\n"
-                                        f"💡 Images and metadata included with each JSON")
+                                        f" Images and metadata included with each JSON")
                     else:
                         self.backup_status_var.set("ℹ️ No new JSON backups to upload")
                         messagebox.showinfo("Bulk Upload", "No new JSON backups found to upload.")
@@ -1516,13 +1516,13 @@ class SettingsPanel:
                                 f"📊 Records: {total_records_uploaded}\n"
                                 f"🖼️ Images: {total_images_uploaded}\n"
                                 f"📋 Reports: {total_reports_uploaded}\n\n"
-                                f"✅ All data backed up to cloud successfully!\n"
+                                f" All data backed up to cloud successfully!\n"
                                 f"💾 Local copies remain available for offline access")
             else:
                 # Show error
                 # error_msg = backup_results.get("error", "Unknown error")
                 # self.backup_status_var.set(f"❌ Comprehensive backup failed: {error_msg}")
-                messagebox.showinfo("Comprehensive Backup Success",f"✅ Cloud Backup successful!\n\n")
+                messagebox.showinfo("Comprehensive Backup Success",f" Cloud Backup successful!\n\n")
             
             # Refresh JSON count
             self.refresh_json_count()
@@ -1593,12 +1593,12 @@ class SettingsPanel:
 
     📄 LOCAL JSON BACKUPS:
     Local JSON Files Ready: {json_count}
-    Status: {'✅ Ready for bulk upload' if json_count > 0 else '⭕ No JSON backups found'}
+    Status: {' Ready for bulk upload' if json_count > 0 else '⭕ No JSON backups found'}
 
     ⏰ UPLOAD INFORMATION:
     Last Upload: {summary.get('last_upload', 'Never')}
 
-    💡 FEATURES:
+     FEATURES:
     ✓ Offline-first operation (no delays during saves)
     ✓ Local JSON backups for complete records
     ✓ Bulk JSON upload for efficient cloud sync
@@ -1606,7 +1606,7 @@ class SettingsPanel:
     ✓ Incremental cloud backup (only new/changed files)
     ✓ Organized folder structure (no duplicates)
 
-    🌐 CONNECTION STATUS: {'✅ Connected' if summary.get('total_files', -1) >= 0 else '❌ Error'}
+    🌐 CONNECTION STATUS: {' Connected' if summary.get('total_files', -1) >= 0 else '❌ Error'}
     """
             
             # Insert text
@@ -1729,7 +1729,7 @@ class SettingsPanel:
                 # Test by listing files
                 files = cloud_storage.list_files()
                 messagebox.showinfo("Connection Test", 
-                                  f"✅ Connection successful!\n\n"
+                                  f" Connection successful!\n\n"
                                   f"Bucket: {config.CLOUD_BUCKET_NAME}\n"
                                   f"Files found: {len(files)}")
             else:
@@ -1812,7 +1812,7 @@ class SettingsPanel:
         
         # Method 0: Check if we have a direct reference (set by main app)
         if hasattr(self, 'app_data_manager') and self.app_data_manager:
-            print("✅ Found data_manager from direct reference")
+            print(" Found data_manager from direct reference")
             return self.app_data_manager
         
         # Method 1: Try to traverse widget hierarchy to find app instance
@@ -1825,13 +1825,13 @@ class SettingsPanel:
             
             # Check if this widget has data_manager
             if hasattr(widget, 'data_manager'):
-                print(f"✅ Found data_manager at widget level {attempts}")
+                print(f" Found data_manager at widget level {attempts}")
                 return widget.data_manager
             
             # Check if this widget is the main app (TharuniApp)
             if hasattr(widget, '__class__') and 'App' in widget.__class__.__name__:
                 if hasattr(widget, 'data_manager'):
-                    print(f"✅ Found data_manager in main app: {widget.__class__.__name__}")
+                    print(f" Found data_manager in main app: {widget.__class__.__name__}")
                     return widget.data_manager
             
             # Try different parent references
@@ -1859,7 +1859,7 @@ class SettingsPanel:
             
             # Check if root has data_manager
             if hasattr(root, 'data_manager'):
-                print("✅ Found data_manager in root window")
+                print(" Found data_manager in root window")
                 return root.data_manager
             
             # Search all children of root for data_manager
@@ -1879,7 +1879,7 @@ class SettingsPanel:
             
             result = find_in_children(root)
             if result:
-                print("✅ Found data_manager in widget children")
+                print(" Found data_manager in widget children")
                 return result
             
         except Exception as e:
@@ -1890,7 +1890,7 @@ class SettingsPanel:
             import tkinter as tk
             root_windows = tk._default_root
             if root_windows and hasattr(root_windows, 'data_manager'):
-                print("✅ Found data_manager in default root")
+                print(" Found data_manager in default root")
                 return root_windows.data_manager
         except:
             pass
@@ -1973,7 +1973,7 @@ class SettingsPanel:
     ⏰ BACKUP TIME:
     {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-    📂 CLOUD STRUCTURE:
+   CLOUD STRUCTURE:
     Records: Agency/Site/Ticket/timestamp.json
     Images: Agency/Site/Ticket/images/
     Reports: daily_reports/YYYY-MM-DD/
@@ -1985,7 +1985,7 @@ class SettingsPanel:
                 for i, error in enumerate(results.get('errors', []), 1):
                     results_text += f"   {i}. {error}\n"
             
-            results_text += f"\n{'=' * 50}\n✅ Backup completed successfully!"
+            results_text += f"\n{'=' * 50}\n Backup completed successfully!"
             
             # Insert text
             text_widget.insert(tk.END, results_text)
@@ -2172,7 +2172,7 @@ class SettingsPanel:
 💾 Storage Size: {summary.get('total_size', 'Unknown')}
 ⏰ Last Upload: {summary.get('last_upload', 'Never')}
 
-✅ Cloud connection is working properly!
+ Cloud connection is working properly!
 
 🔄 Auto-refresh available - click refresh button for latest data.
 """

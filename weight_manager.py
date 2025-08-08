@@ -24,7 +24,7 @@ class WeightManager:
                 print("❌ WEIGHT CAPTURE BLOCKED - Vehicle check failed")
                 return False
             
-            print("✅ Vehicle check passed - proceeding with weight capture")
+            print(" Vehicle check passed - proceeding with weight capture")
             
             # Check test mode first using improved method
             if self.is_test_mode_enabled():
@@ -90,7 +90,7 @@ class WeightManager:
                         if not is_allowed:
                             print("❌ WEIGHT CAPTURE BLOCKED - Vehicle is pending for NEW first weighment")
                             return False
-                        print("✅ Weight capture allowed - vehicle not pending for new first weighment")
+                        print(" Weight capture allowed - vehicle not pending for new first weighment")
                         return True
                     else:
                         print("❌ No form validator - blocking for safety")

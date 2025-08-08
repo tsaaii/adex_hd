@@ -234,7 +234,7 @@ class PendingVehiclesPanel:
                     # Add to pending and mark vehicle as seen
                     pending_records.append(record)
                     seen_vehicle_numbers.add(vehicle_no)
-                    print(f"🚛 PENDING DEBUG: ✅ Added to pending: {ticket_no} (vehicle: {vehicle_no})")
+                    print(f"🚛 PENDING DEBUG:  Added to pending: {ticket_no} (vehicle: {vehicle_no})")
                     self.logger.info(f"Added to pending: {ticket_no} (vehicle: {vehicle_no})")
                 else:
                     print(f"🚛 PENDING DEBUG: ⏭️  Skipped ticket {ticket_no} - not pending")
@@ -259,7 +259,7 @@ class PendingVehiclesPanel:
             # Apply alternating row colors
             self._apply_row_colors()
             
-            print(f"🚛 PENDING DEBUG: ✅ Successfully refreshed pending list with {len(pending_records)} unique vehicles")
+            print(f"🚛 PENDING DEBUG:  Successfully refreshed pending list with {len(pending_records)} unique vehicles")
             self.logger.info(f"Successfully refreshed pending list with {len(pending_records)} unique vehicles")
             
         except Exception as e:
@@ -288,7 +288,7 @@ class PendingVehiclesPanel:
                 if len(item_values) > 0 and item_values[0] == ticket_no:
                     self.tree.delete(item)
                     removed = True
-                    print(f"🚛 PENDING DEBUG: ✅ Removed ticket {ticket_no} from pending list")
+                    print(f"🚛 PENDING DEBUG:  Removed ticket {ticket_no} from pending list")
                     self.logger.info(f"Removed ticket {ticket_no} from pending list")
                     break
                     

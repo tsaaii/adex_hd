@@ -202,7 +202,7 @@ def create_form(self, parent):
 
     # FIXED: Updated note about ticket increment behavior
     weight_note = ttk.Label(state_frame, 
-                          text="💡 Ticket number increments only after BOTH weighments are completed", 
+                          text=" Ticket number increments only after BOTH weighments are completed", 
                           font=("Segoe UI", 8, "italic"), 
                           foreground="green")
     weight_note.pack(side=tk.RIGHT)

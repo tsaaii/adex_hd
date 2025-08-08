@@ -440,10 +440,10 @@ class EnhancedLogger:
     def print_success(self, message):
         """Print and log success message"""
         try:
-            safe_print(f"✅ {message}")
+            safe_print(f" {message}")
             self.logger.info(f"SUCCESS: {message}")
         except:
-            safe_print(f"✅ {message}")
+            safe_print(f" {message}")
     
     def print_warning(self, message):
         """Print and log warning message"""

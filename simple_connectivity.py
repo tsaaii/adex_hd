@@ -85,10 +85,10 @@ class SimpleQueue:
             if os.path.exists(self.queue_file):
                 with open(self.queue_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    print(f"📂 Loaded {len(data)} items from queue file")
+                    print(f"Loaded {len(data)} items from queue file")
                     return data
             else:
-                print("📂 No existing queue file found, starting with empty queue")
+                print("No existing queue file found, starting with empty queue")
                 return []
         except Exception as e:
             print(f"❌ Error loading queue file: {e}")
@@ -292,7 +292,7 @@ class FastSync:
                             if result["success"]:
                                 successful_ids.append(result["item_id"])
                                 batch_images_uploaded += result["images_uploaded"]
-                                print(f"✅ {total_processed + i}/{total_processed + batch_size}: {result['ticket_no']} ({result['images_uploaded']}/{result['total_images']} images)")
+                                print(f" {total_processed + i}/{total_processed + batch_size}: {result['ticket_no']} ({result['images_uploaded']}/{result['total_images']} images)")
                             else:
                                 failed_count += 1
                                 error_msg = result.get("error", "Unknown error")
@@ -334,7 +334,7 @@ class FastSync:
             
             # Enhanced final status with complete metrics
             print(f"🔥 ENHANCED FAST SYNC COMPLETED in {duration:.2f}s:")
-            print(f"   ✅ Total Synced: {synced_count} records")
+            print(f"    Total Synced: {synced_count} records")
             print(f"   🖼️ Total Images: {total_images_uploaded}")
             print(f"   ❌ Total Failed: {total_failed}")
             print(f"   📋 Remaining: {remaining_items}")
@@ -586,7 +586,7 @@ def add_connectivity_to_app(app_instance):
         # Find title_box in header
         if hasattr(app_instance, 'title_box'):
             app_instance.connectivity_ui = ConnectivityUI(app_instance.title_box, app_instance.data_manager)
-            print("✅ Enhanced FAST connectivity added to app")
+            print(" Enhanced FAST connectivity added to app")
             return True
         else:
             print("❌ Could not find title_box in app")
@@ -612,7 +612,7 @@ def cleanup_connectivity(app_instance):
     try:
         if hasattr(app_instance, 'connectivity_ui') and app_instance.connectivity_ui:
             app_instance.connectivity_ui.cleanup()
-            print("✅ Connectivity cleanup completed")
+            print(" Connectivity cleanup completed")
         else:
             print("ℹ️ No connectivity UI to cleanup")
     except Exception as e:

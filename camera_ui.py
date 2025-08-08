@@ -1,4 +1,4 @@
-# Updated camera_ui.py - Enhanced UI for robust continuous camera feed
+# Updated camera_ui.py - Enhanced UI for robust continuous camera feed with complete controls
 
 import tkinter as tk
 from tkinter import ttk
@@ -31,13 +31,16 @@ def create_cameras_panel(self, parent):
     cameras_container.columnconfigure(0, weight=1)
     cameras_container.columnconfigure(1, weight=1)
     
+    # SIMPLIFIED FIX: Both cameras auto-start if any cameras are detected
+    cameras_detected = len(available_cameras) > 0
+    
     # Front camera panel
     front_camera_index = 0 if 0 in available_cameras else (available_cameras[0] if available_cameras else 0)
     front_panel = ttk.LabelFrame(cameras_container, text=f"🎥 Front Camera (USB {front_camera_index}) - Live Feed")
     front_panel.grid(row=0, column=0, padx=3, pady=2, sticky="nsew")
     
-    # Create front camera with robust continuous feed enabled
-    self.front_camera = RobustCameraView(front_panel, camera_index=front_camera_index, auto_start=(front_camera_index in available_cameras))
+    # Create front camera - always auto-start if cameras detected
+    self.front_camera = RobustCameraView(front_panel, camera_index=front_camera_index, auto_start=cameras_detected)
     self.front_camera.save_function = self.image_handler.save_front_image
     
     # Back camera panel
@@ -45,9 +48,15 @@ def create_cameras_panel(self, parent):
     back_panel = ttk.LabelFrame(cameras_container, text=f"🎥 Back Camera (USB {back_camera_index}) - Live Feed")
     back_panel.grid(row=0, column=1, padx=3, pady=2, sticky="nsew")
     
-    # Create back camera with robust continuous feed enabled
-    self.back_camera = RobustCameraView(back_panel, camera_index=back_camera_index, auto_start=(back_camera_index in available_cameras))
+    # FIXED: Create back camera - always auto-start if cameras detected
+    self.back_camera = RobustCameraView(back_panel, camera_index=back_camera_index, auto_start=cameras_detected)
     self.back_camera.save_function = self.image_handler.save_back_image
+    
+    # Debug output
+    print(f"📹 Camera Setup (Simplified):")
+    print(f"   Available cameras: {available_cameras}")
+    print(f"   Both cameras auto_start: {cameras_detected}")
+    print(f"   Front: USB {front_camera_index}, Back: USB {back_camera_index}")
     
     # Load camera settings and configure cameras
     self.load_camera_settings()
@@ -165,7 +174,7 @@ def create_cameras_panel(self, parent):
                                   font=("Segoe UI", 9, "bold"))
     total_image_status.grid(row=2, column=1, sticky="w", padx=10)
     
-    # Action buttons section (enhanced)
+    # Action buttons section (enhanced) - KEPT COMPLETE FROM ORIGINAL
     action_buttons_frame = ttk.LabelFrame(camera_frame, text="🔧 Record Management")
     action_buttons_frame.pack(fill=tk.X, padx=5, pady=(5, 8))
     

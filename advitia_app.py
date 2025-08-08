@@ -755,7 +755,7 @@ class TharuniApp:
             # IMPORTANT: Set data manager reference in settings panel for cloud backup
             if hasattr(self.settings_panel, '__dict__'):
                 self.settings_panel.app_data_manager = self.data_manager
-                self.logger.info("✅ Data manager reference set in settings panel")
+                self.logger.info(" Data manager reference set in settings panel")
             
             # Also store reference in parent widget for widget hierarchy search
             settings_tab.data_manager = self.data_manager
@@ -930,7 +930,7 @@ class TharuniApp:
             
             # Handle the save result
             if isinstance(save_result, dict) and save_result.get('success', False):
-                self.logger.info(f"✅ Record {ticket_no} saved successfully")
+                self.logger.info(f" Record {ticket_no} saved successfully")
                 
                 # Extract weighment analysis from save result
                 is_complete_record = save_result.get('is_complete_record', False)
@@ -985,7 +985,7 @@ class TharuniApp:
                     print(f"🎫 TICKET FLOW DEBUG: INCREMENTING ticket counter after save of {ticket_no}")
                     commit_success = self.main_form.commit_current_ticket_number()
                     if commit_success:
-                        print(f"🎫 TICKET FLOW DEBUG: ✅ Ticket counter incremented from {ticket_no}")
+                        print(f"🎫 TICKET FLOW DEBUG:  Ticket counter incremented from {ticket_no}")
                         ticket_incremented = True
                     else:
                         print(f"🎫 TICKET FLOW DEBUG: ❌ Failed to increment ticket counter")
@@ -1006,10 +1006,10 @@ class TharuniApp:
                     # Show success message
                     try:
                         messagebox.showinfo("First Weighment Saved", 
-                                        f"✅ First weighment saved for ticket {ticket_no}!\n"
+                                        f" First weighment saved for ticket {ticket_no}!\n"
                                         f"🚛 Vehicle added to pending queue\n"
                                         f"🎫 New ticket number: {new_ticket}\n\n"
-                                        f"💡 Vehicle can return later for second weighment")
+                                        f" Vehicle can return later for second weighment")
                     except Exception as msg_error:
                         self.logger.warning(f"Could not show messagebox: {msg_error}")
                         
@@ -1030,13 +1030,13 @@ class TharuniApp:
                         if pdf_generated and pdf_path:
                             relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
                             messagebox.showinfo("Complete Record Saved + PDF Generated", 
-                                            f"✅ Complete weighment saved for ticket {ticket_no}!\n"
-                                            f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                            f" Complete weighment saved for ticket {ticket_no}!\n"
+                                            f" PDF generated: {os.path.basename(pdf_path)}\n"
                                             f"🎫 New ticket number: {new_ticket}\n\n"
-                                            f"📂 PDF Location: {relative_folder}")
+                                            f"PDF Location: {relative_folder}")
                         else:
                             messagebox.showinfo("Complete Record Saved", 
-                                            f"✅ Complete weighment saved for ticket {ticket_no}!\n"
+                                            f" Complete weighment saved for ticket {ticket_no}!\n"
                                             f"🎫 New ticket number: {new_ticket}")
                     except Exception as msg_error:
                         self.logger.warning(f"Could not show messagebox: {msg_error}")
@@ -1063,13 +1063,13 @@ class TharuniApp:
                         if pdf_generated and pdf_path:
                             relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
                             messagebox.showinfo("Second Weighment Completed + PDF Generated", 
-                                            f"✅ Second weighment completed for ticket {ticket_no}!\n"
-                                            f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                            f" Second weighment completed for ticket {ticket_no}!\n"
+                                            f" PDF generated: {os.path.basename(pdf_path)}\n"
                                             f"🎫 Ready for next vehicle: {new_ticket}\n\n"
-                                            f"📂 PDF Location: {relative_folder}")
+                                            f"PDF Location: {relative_folder}")
                         else:
                             messagebox.showinfo("Second Weighment Completed", 
-                                            f"✅ Second weighment completed for ticket {ticket_no}!\n"
+                                            f" Second weighment completed for ticket {ticket_no}!\n"
                                             f"🎫 Ready for next vehicle: {new_ticket}")
                     except Exception as msg_error:
                         self.logger.warning(f"Could not show messagebox: {msg_error}")
@@ -1090,7 +1090,7 @@ class TharuniApp:
                     
                     try:
                         messagebox.showinfo("First Weighment Updated", 
-                                        f"✅ First weighment updated for ticket {ticket_no}!\n"
+                                        f" First weighment updated for ticket {ticket_no}!\n"
                                         f"🎫 Current ticket: {new_ticket}")
                     except Exception as msg_error:
                         self.logger.warning(f"Could not show messagebox: {msg_error}")
@@ -1110,7 +1110,7 @@ class TharuniApp:
                     
                     try:
                         messagebox.showinfo("Record Saved", 
-                                        f"✅ Record saved for ticket {ticket_no}!\n"
+                                        f" Record saved for ticket {ticket_no}!\n"
                                         f"🎫 Current ticket: {new_ticket}")
                     except Exception as msg_error:
                         self.logger.warning(f"Could not show messagebox: {msg_error}")

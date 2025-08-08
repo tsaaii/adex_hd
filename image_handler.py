@@ -90,7 +90,7 @@ class ImageHandler:
                     if not is_allowed:
                         print("❌ IMAGE SAVE BLOCKED - Vehicle is pending for NEW first weighment")
                         return False
-                    print("✅ Image save allowed - vehicle not pending for new first weighment")
+                    print(" Image save allowed - vehicle not pending for new first weighment")
                     return True
                 else:
                     print("❌ No form validator - blocking for safety")
@@ -204,7 +204,7 @@ class ImageHandler:
             print("❌ FRONT IMAGE SAVE BLOCKED - Vehicle check failed")
             return False
 
-        print("✅ Vehicle check passed - proceeding with front image save")
+        print(" Vehicle check passed - proceeding with front image save")
         
         # Rest of the existing save_front_image code...
         image_weighment = self.determine_current_image_weighment()
@@ -282,7 +282,7 @@ class ImageHandler:
             # Update status
             self.update_image_status()
             
-            print(f"✅ {weighment_label} weighment front image saved successfully: {filename}")
+            print(f" {weighment_label} weighment front image saved successfully: {filename}")
             
             # Show success message
             messagebox.showinfo("Success", f"{weighment_label} weighment front image saved successfully!")
@@ -312,7 +312,7 @@ class ImageHandler:
             print("❌ BACK IMAGE SAVE BLOCKED - Vehicle check failed")
             return False
 
-        print("✅ Vehicle check passed - proceeding with back image save")
+        print(" Vehicle check passed - proceeding with back image save")
         
         # Rest of the existing save_back_image code...
         image_weighment = self.determine_current_image_weighment()
@@ -390,7 +390,7 @@ class ImageHandler:
             # Update status
             self.update_image_status()
             
-            print(f"✅ {weighment_label} weighment back image saved successfully: {filename}")
+            print(f" {weighment_label} weighment back image saved successfully: {filename}")
             
             # Show success message
             messagebox.showinfo("Success", f"{weighment_label} weighment back image saved successfully!")
@@ -439,7 +439,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.first_front_image_path = filepath
                 self.update_image_status()
-                print(f"✅ First front image saved: {filename}")
+                print(f" First front image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save first front image")
@@ -483,7 +483,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.first_back_image_path = filepath
                 self.update_image_status()
-                print(f"✅ First back image saved: {filename}")
+                print(f" First back image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save first back image")
@@ -527,7 +527,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.second_front_image_path = filepath
                 self.update_image_status()
-                print(f"✅ Second front image saved: {filename}")
+                print(f" Second front image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save second front image")
@@ -571,7 +571,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.second_back_image_path = filepath
                 self.update_image_status()
-                print(f"✅ Second back image saved: {filename}")
+                print(f" Second back image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save second back image")

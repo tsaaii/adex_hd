@@ -262,7 +262,7 @@ class MainForm:
 
         # Note about ticket increment behavior
         weight_note = ttk.Label(state_frame, 
-                              text="💡 Ticket number increments only after BOTH weighments are completed", 
+                              text=" Ticket number increments only after BOTH weighments are completed", 
                               font=("Segoe UI", 8, "italic"), 
                               foreground="green")
         weight_note.pack(side=tk.RIGHT)
@@ -277,7 +277,7 @@ class MainForm:
                     status = f"❌ USB {self.front_camera.camera_index} Not Available"
                 elif self.front_camera.is_running:
                     if self.front_camera.connection_stable:
-                        status = f"✅ {self.front_camera.camera_type} {self.front_camera.camera_index} Active"
+                        status = f" {self.front_camera.camera_type} {self.front_camera.camera_index} Active"
                     else:
                         status = f"⚠️ {self.front_camera.camera_type} {self.front_camera.camera_index} Connecting..."
                 else:
@@ -290,7 +290,7 @@ class MainForm:
                     status = f"❌ USB {self.back_camera.camera_index} Not Available"
                 elif self.back_camera.is_running:
                     if self.back_camera.connection_stable:
-                        status = f"✅ {self.back_camera.camera_type} {self.back_camera.camera_index} Active"
+                        status = f" {self.back_camera.camera_type} {self.back_camera.camera_index} Active"
                     else:
                         status = f"⚠️ {self.back_camera.camera_type} {self.back_camera.camera_index} Connecting..."
                 else:
@@ -314,7 +314,7 @@ class MainForm:
                 second_back = bool(self.image_handler.main_form.second_back_image_path)
                 
                 # Update first weighment status
-                first_status = f"Front: {'✅' if first_front else '❌'} Back: {'✅' if first_back else '❌'}"
+                first_status = f"Front: {'' if first_front else '❌'} Back: {'' if first_back else '❌'}"
                 if hasattr(self, 'first_image_status_var'):
                     self.first_image_status_var.set(first_status)
                     if hasattr(self, 'first_image_status'):
@@ -322,7 +322,7 @@ class MainForm:
                         self.first_image_status.config(foreground=color)
                 
                 # Update second weighment status
-                second_status = f"Front: {'✅' if second_front else '❌'} Back: {'✅' if second_back else '❌'}"
+                second_status = f"Front: {'' if second_front else '❌'} Back: {'' if second_back else '❌'}"
                 if hasattr(self, 'second_image_status_var'):
                     self.second_image_status_var.set(second_status)
                     if hasattr(self, 'second_image_status'):
@@ -662,7 +662,7 @@ class MainForm:
             
             # Show results
             if available_cameras:
-                print(f"✅ Detected cameras: {available_cameras}")
+                print(f" Detected cameras: {available_cameras}")
             else:
                 print("❌ No cameras detected")
                 
@@ -741,7 +741,7 @@ class MainForm:
                     status = f"❌ USB {self.front_camera.camera_index} Not Available"
                 elif self.front_camera.is_running:
                     if self.front_camera.connection_stable:
-                        status = f"✅ {self.front_camera.camera_type} {self.front_camera.camera_index} Active"
+                        status = f" {self.front_camera.camera_type} {self.front_camera.camera_index} Active"
                     else:
                         status = f"⚠️ {self.front_camera.camera_type} {self.front_camera.camera_index} Connecting..."
                 else:
@@ -754,7 +754,7 @@ class MainForm:
                     status = f"❌ USB {self.back_camera.camera_index} Not Available"
                 elif self.back_camera.is_running:
                     if self.back_camera.connection_stable:
-                        status = f"✅ {self.back_camera.camera_type} {self.back_camera.camera_index} Active"
+                        status = f" {self.back_camera.camera_type} {self.back_camera.camera_index} Active"
                     else:
                         status = f"⚠️ {self.back_camera.camera_type} {self.back_camera.camera_index} Connecting..."
                 else:
@@ -795,7 +795,7 @@ class MainForm:
                     second_back = bool(getattr(self.image_handler.main_form, 'second_back_image_path', None))
                 
                 # Update first weighment status
-                first_status = f"Front: {'✅' if first_front else '❌'} Back: {'✅' if first_back else '❌'}"
+                first_status = f"Front: {'' if first_front else '❌'} Back: {'' if first_back else '❌'}"
                 if hasattr(self, 'first_image_status_var'):
                     self.first_image_status_var.set(first_status)
                     if hasattr(self, 'first_image_status'):
@@ -803,7 +803,7 @@ class MainForm:
                         self.first_image_status.config(foreground=color)
                 
                 # Update second weighment status
-                second_status = f"Front: {'✅' if second_front else '❌'} Back: {'✅' if second_back else '❌'}"
+                second_status = f"Front: {'' if second_front else '❌'} Back: {'' if second_back else '❌'}"
                 if hasattr(self, 'second_image_status_var'):
                     self.second_image_status_var.set(second_status)
                     if hasattr(self, 'second_image_status'):
@@ -1109,7 +1109,7 @@ class MainForm:
         instruction_frame = ttk.Frame(status_frame)
         instruction_frame.pack(fill=tk.X, padx=5, pady=2)
         
-        instruction_text = ("💡 Images are optional - records can be saved with or without images")
+        instruction_text = (" Images are optional - records can be saved with or without images")
         instruction_label = ttk.Label(instruction_frame, text=instruction_text, 
                                      font=("Segoe UI", 8, "italic"), 
                                      foreground="green")
@@ -1702,7 +1702,7 @@ class MainForm:
             
             success = config.commit_next_ticket_number()
             if success:
-                print(f"🎫 FORM DEBUG: ✅ Successfully committed ticket number: {current_ticket}")
+                print(f"🎫 FORM DEBUG:  Successfully committed ticket number: {current_ticket}")
             else:
                 print(f"🎫 FORM DEBUG: ❌ Failed to commit ticket number: {current_ticket}")
             return success
@@ -1949,7 +1949,7 @@ class MainForm:
             # Vehicle not pending - clear warnings
             self.vehicle_entry.config(style="TEntry")
             if hasattr(self, 'vehicle_status_label'):
-                self.vehicle_status_label.config(text="✅ Available", foreground="green")
+                self.vehicle_status_label.config(text=" Available", foreground="green")
                 
         except Exception as e:
             print(f"Error in delayed vehicle check: {e}")
