@@ -14,7 +14,31 @@ import config
 import threading
 import time
 from contextlib import contextmanager
+import threading
+import time
+from contextlib import contextmanager
 
+# Add this global lock after the imports
+_image_processing_lock = threading.RLock()  # Prevents concurrent image processing
+_pdf_generation_lock = threading.RLock()   # Prevents concurrent PDF generation
+@contextmanager
+def safe_image_operation(max_retries=3, retry_delay=0.1):
+    """Context manager for safe image file operations with retries"""
+    for attempt in range(max_retries):
+        try:
+            with _image_processing_lock:
+                yield
+                break  # Success, exit the retry loop
+        except Exception as e:
+            if "closed file" in str(e).lower() and attempt < max_retries - 1:
+                # Wait a bit and retry for closed file errors
+                time.sleep(retry_delay)
+                continue
+            else:
+                # Re-raise the exception if it's not a closed file error or max retries reached
+                raise
+    else:
+        raise RuntimeError("Max retries exceeded for image operation")
 # Global file lock for CSV operations
 _csv_file_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
 
@@ -300,8 +324,61 @@ class DataManager:
             
             return {'success': False, 'error': str(e)}
 
+    def normalize_record_keys(self, record):
+        """Normalize CSV record keys to handle both formats (spaces and underscores)
+        
+        This ensures compatibility between CSV headers with spaces and code expecting underscores.
+        
+        Args:
+            record: Dictionary from CSV DictReader
+            
+        Returns:
+            dict: Record with both formats available
+        """
+        if not isinstance(record, dict):
+            return record
+        
+        # Create normalized record with both formats
+        normalized = record.copy()
+        
+        # Mapping from CSV headers (with spaces) to code expectations (with underscores)
+        header_mapping = {
+            'Date': 'date',
+            'Time': 'time',
+            'Site Name': 'site_name',
+            'Agency Name': 'agency_name',
+            'Material': 'material',
+            'Ticket No': 'ticket_no',
+            'Vehicle No': 'vehicle_no',
+            'Transfer Party Name': 'transfer_party_name',
+            'First Weight': 'first_weight',
+            'First Timestamp': 'first_timestamp',
+            'Second Weight': 'second_weight',
+            'Second Timestamp': 'second_timestamp',
+            'Net Weight': 'net_weight',
+            'Material Type': 'material_type',
+            'First Front Image': 'first_front_image',
+            'First Back Image': 'first_back_image',
+            'Second Front Image': 'second_front_image',
+            'Second Back Image': 'second_back_image',
+            'Site Incharge': 'site_incharge',
+            'User Name': 'user_name'
+        }
+        
+        # Add underscore versions for each spaced header
+        for csv_header, underscore_key in header_mapping.items():
+            if csv_header in record:
+                normalized[underscore_key] = record[csv_header]
+        
+        # Also add spaced versions for each underscore key (reverse mapping)
+        for underscore_key, csv_header in {v: k for k, v in header_mapping.items()}.items():
+            if underscore_key in record:
+                normalized[csv_header] = record[underscore_key]
+        
+        return normalized
+
     def get_filtered_records(self, filter_text=""):
-        """Get records filtered by text with simplified safe file handling"""
+        """Get records filtered by text with normalized keys - ENHANCED"""
         try:
             # Check shutdown status first
             if getattr(self, 'is_shutting_down', False):
@@ -323,7 +400,10 @@ class DataManager:
                     # Read all data at once with simple file handling
                     with open(current_file, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
                         reader = csv.DictReader(csv_file)
-                        all_records = list(reader)  # Read everything immediately
+                        raw_records = list(reader)  # Read everything immediately
+                    
+                    # Normalize all records to handle both header formats
+                    all_records = [self.normalize_record_keys(record) for record in raw_records]
                     
                     self._safe_data_log("info", f"Successfully loaded {len(all_records)} records")
                     
@@ -337,7 +417,14 @@ class DataManager:
                     
                     for record in all_records:
                         try:
-                            # Check if filter text exists in any field
+                            # SPECIAL CASE: If filter looks like a ticket number, do case-insensitive exact match first
+                            ticket_no = record.get('ticket_no', '').strip()
+                            if ticket_no and ticket_no.lower() == filter_text:
+                                print(f"🔍 DEBUG: Found exact ticket match: {ticket_no} (searched for {filter_text})")
+                                filtered_records.append(record)
+                                continue
+                            
+                            # General case: Check if filter text exists in any field (case-insensitive)
                             if any(filter_text in str(value).lower() for value in record.values() if value is not None):
                                 filtered_records.append(record)
                         except Exception as filter_error:
@@ -345,6 +432,8 @@ class DataManager:
                             continue
                     
                     self._safe_data_log("info", f"Filtered {len(all_records)} records to {len(filtered_records)} using filter: '{filter_text}'")
+                    print(f"🔍 DEBUG: Filter '{filter_text}' found {len(filtered_records)} records")
+                    
                     return filtered_records
                     
                 except Exception as read_error:
@@ -364,8 +453,9 @@ class DataManager:
             self._safe_data_log("error", f"Error in get_filtered_records: {e}")
             return []
 
+    # Also update get_all_records to use normalization:
     def get_all_records(self):
-        """Simplified get_all_records with retry logic"""
+        """Get all records with normalized keys - ENHANCED"""
         # Check shutdown status first
         if getattr(self, 'is_shutting_down', False):
             print("🛑 DATA MANAGER: get_all_records blocked - shutdown in progress")
@@ -382,69 +472,27 @@ class DataManager:
         for attempt in range(3):
             try:
                 with open(current_file, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
-                    reader = csv.reader(csv_file)
-                    
-                    # Skip header
-                    header = next(reader, None)
-                    if not header:
-                        self._safe_data_log("warning", "CSV file has no header")
-                        return records
-                    
-                    # Read all records at once
-                    all_rows = list(reader)
+                    reader = csv.DictReader(csv_file)
+                    raw_records = list(reader)
                 
-                # Process records outside the file context
-                for row_num, row in enumerate(all_rows, 1):
-                    # Check shutdown during processing
-                    if getattr(self, 'is_shutting_down', False):
-                        print("🛑 DATA MANAGER: Breaking record read - shutdown in progress")
-                        break
-                    
-                    try:
-                        if len(row) >= 13:  # Minimum fields required
-                            record = {
-                                'date': row[0] if len(row) > 0 else '',
-                                'time': row[1] if len(row) > 1 else '',
-                                'site_name': row[2] if len(row) > 2 else '',
-                                'agency_name': row[3] if len(row) > 3 else '',
-                                'material': row[4] if len(row) > 4 else '',
-                                'ticket_no': row[5] if len(row) > 5 else '',
-                                'vehicle_no': row[6] if len(row) > 6 else '',
-                                'transfer_party_name': row[7] if len(row) > 7 else '',
-                                'first_weight': row[8] if len(row) > 8 else '',
-                                'first_timestamp': row[9] if len(row) > 9 else '',
-                                'second_weight': row[10] if len(row) > 10 else '',
-                                'second_timestamp': row[11] if len(row) > 11 else '',
-                                'net_weight': row[12] if len(row) > 12 else '',
-                                'material_type': row[13] if len(row) > 13 else '',
-                                'first_front_image': row[14] if len(row) > 14 else '',
-                                'first_back_image': row[15] if len(row) > 15 else '',
-                                'second_front_image': row[16] if len(row) > 16 else '',
-                                'second_back_image': row[17] if len(row) > 17 else '',
-                                'site_incharge': row[18] if len(row) > 18 else '',
-                                'user_name': row[19] if len(row) > 19 else ''
-                            }
-                            records.append(record)
-                    except Exception as row_error:
-                        self._safe_data_log("warning", f"Error processing row {row_num}: {row_error}")
-                        continue
+                # Normalize all records
+                records = [self.normalize_record_keys(record) for record in raw_records]
                 
-                self._safe_data_log("info", f"Successfully loaded {len(records)} records from {current_file}")
+                self._safe_data_log("info", f"Successfully loaded {len(records)} records")
                 return records
                 
             except Exception as read_error:
                 error_str = str(read_error).lower()
                 if ("closed file" in error_str or "i/o operation" in error_str) and attempt < 2:
                     print(f"[RETRY] get_all_records attempt {attempt + 1} failed, retrying: {read_error}")
-                    time.sleep(0.3 * (attempt + 1))  # Progressive delay
+                    time.sleep(0.3 * (attempt + 1))
                     continue
                 else:
-                    raise
+                    self._safe_data_log("error", f"Error reading records: {read_error}")
+                    return []
         
-        # If all retries failed
-        self._safe_data_log("error", f"All retry attempts failed for get_all_records")
-        return []
-
+        return [] 
+                    
     def _setup_fallback_folders(self):
         """Setup fallback folders when main setup fails"""
         try:
@@ -1855,398 +1903,460 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
         return self.today_pdf_folder
     
     def create_pdf_report(self, records_data, save_path):
-        """Create PDF report with 4-image grid for complete records - FIXED image handling
-        
-        Args:
-            records_data: List of record dictionaries
-            save_path: Path to save the PDF
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """FIXED: Create PDF report with 4-image grid and I/O error protection"""
         if not REPORTLAB_AVAILABLE:
             self.logger.error("ReportLab not available for PDF generation")
             return False
             
         try:
-            # Ensure output directory exists
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            
-            doc = SimpleDocTemplate(save_path, pagesize=A4,
-                                    rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-            
-            styles = getSampleStyleSheet()
-            elements = []
-            temp_files_to_cleanup = []  # Track temp files for cleanup
-
-            # Create styles (same as before)
-            header_style = ParagraphStyle(
-                name='HeaderStyle',
-                fontSize=18,
-                alignment=TA_CENTER,
-                fontName='Helvetica-Bold',
-                textColor=colors.black,
-                spaceAfter=6,
-                spaceBefore=6
-            )
-            
-            subheader_style = ParagraphStyle(
-                name='SubHeaderStyle',
-                fontSize=12,
-                alignment=TA_CENTER,
-                fontName='Helvetica',
-                textColor=colors.black,
-                spaceAfter=12
-            )
-            
-            section_header_style = ParagraphStyle(
-                name='SectionHeader',
-                fontSize=13,
-                alignment=TA_CENTER,
-                fontName='Helvetica-Bold',
-                textColor=colors.black,
-                spaceAfter=6,
-                spaceBefore=6
-            )
-
-            label_style = ParagraphStyle(
-                name='LabelStyle',
-                fontSize=11,
-                fontName='Helvetica-Bold',
-                textColor=colors.black
-            )
-
-            value_style = ParagraphStyle(
-                name='ValueStyle',
-                fontSize=11,
-                fontName='Helvetica',
-                textColor=colors.black
-            )
-
-            for i, record in enumerate(records_data):
-                if i > 0:
-                    elements.append(PageBreak())
-
-                # Get agency information from address config
-                agency_name = record.get('agency_name', 'Unknown Agency')
-                agency_info = self.address_config.get('agencies', {}).get(agency_name, {})
+            with _pdf_generation_lock:  # Prevent concurrent PDF generation
+                # Ensure output directory exists
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 
-                # Header Section with Agency Info
-                elements.append(Paragraph(agency_info.get('name', agency_name), header_style))
+                doc = SimpleDocTemplate(save_path, pagesize=A4,
+                                        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
                 
-                if agency_info.get('address'):
-                    address_text = agency_info.get('address', '').replace('\n', '<br/>')
-                    elements.append(Paragraph(address_text, subheader_style))
+                styles = getSampleStyleSheet()
+                elements = []
+                temp_files_to_cleanup = []  # Track temp files for cleanup
+
+                # Create styles (keeping existing styles)
+                header_style = ParagraphStyle(
+                    name='HeaderStyle',
+                    fontSize=18,
+                    alignment=TA_CENTER,
+                    fontName='Helvetica-Bold',
+                    textColor=colors.black,
+                    spaceAfter=6,
+                    spaceBefore=6
+                )
                 
-                # Contact information
-                contact_info = []
-                if agency_info.get('contact'):
-                    contact_info.append(f"Phone: {agency_info.get('contact')}")
-                if agency_info.get('email'):
-                    contact_info.append(f"Email: {agency_info.get('email')}")
+                subheader_style = ParagraphStyle(
+                    name='SubHeaderStyle',
+                    fontSize=12,
+                    alignment=TA_CENTER,
+                    fontName='Helvetica',
+                    textColor=colors.black,
+                    spaceAfter=12
+                )
                 
-                if contact_info:
-                    elements.append(Paragraph(" | ".join(contact_info), subheader_style))
-                
-                elements.append(Spacer(1, 0.2*inch))
+                section_header_style = ParagraphStyle(
+                    name='SectionHeader',
+                    fontSize=13,
+                    alignment=TA_CENTER,
+                    fontName='Helvetica-Bold',
+                    textColor=colors.black,
+                    spaceAfter=6,
+                    spaceBefore=6
+                )
 
-                # Print date and ticket information
-                print_date = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                ticket_no = record.get('ticket_no', '000')
-                
-                elements.append(Paragraph(f"Print Date: {print_date}", value_style))
-                elements.append(Paragraph(f"Ticket No: {ticket_no}", header_style))
-                elements.append(Spacer(1, 0.15*inch))
+                label_style = ParagraphStyle(
+                    name='LabelStyle',
+                    fontSize=11,
+                    fontName='Helvetica-Bold',
+                    textColor=colors.black
+                )
 
-                # Vehicle Information (same as before)
-                elements.append(Paragraph("VEHICLE INFORMATION", section_header_style))
-                
-                material_value = record.get('material', '') or record.get('material_type', '')
-                user_name_value = record.get('user_name', '') or "Not specified"
-                site_incharge_value = record.get('site_incharge', '') or "Not specified"
-                
-                vehicle_data = [
-                    [Paragraph("<b>Vehicle No:</b>", label_style), Paragraph(record.get('vehicle_no', ''), value_style), 
-                    Paragraph("<b>Date:</b>", label_style), Paragraph(record.get('date', ''), value_style), 
-                    Paragraph("<b>Time:</b>", label_style), Paragraph(record.get('time', ''), value_style)],
-                    [Paragraph("<b>Material:</b>", label_style), Paragraph(material_value, value_style), 
-                    Paragraph("<b>Site Name:</b>", label_style), Paragraph(record.get('site_name', ''), value_style), 
-                    Paragraph("<b>Transfer Party:</b>", label_style), Paragraph(record.get('transfer_party_name', ''), value_style)],
-                    [Paragraph("<b>Agency Name:</b>", label_style), Paragraph(record.get('agency_name', ''), value_style), 
-                    Paragraph("<b>User Name:</b>", label_style), Paragraph(user_name_value, value_style), 
-                    Paragraph("<b>Site Incharge:</b>", label_style), Paragraph(site_incharge_value, value_style)]
-                ]
-                
-                vehicle_inner_table = Table(vehicle_data, colWidths=[1.2*inch, 1.3*inch, 1.0*inch, 1.3*inch, 1.2*inch, 1.5*inch])
-                vehicle_inner_table.setStyle(TableStyle([
-                    ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                    ('FONTSIZE', (0,0), (-1,-1), 13),
-                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('LEFTPADDING', (0,0), (-1,-1), 2),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 2),
-                    ('TOPPADDING', (0,0), (-1,-1), 4),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ]))
-                
-                vehicle_table = Table([[vehicle_inner_table]], colWidths=[7.5*inch])
-                vehicle_table.setStyle(TableStyle([
-                    ('GRID', (0,0), (-1,-1), 1, colors.black),
-                    ('LEFTPADDING', (0,0), (-1,-1), 12),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 12),
-                    ('TOPPADDING', (0,0), (-1,-1), 8),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                ]))
-                elements.append(vehicle_table)
-                elements.append(Spacer(1, 0.15*inch))
+                value_style = ParagraphStyle(
+                    name='ValueStyle',
+                    fontSize=11,
+                    fontName='Helvetica',
+                    textColor=colors.black
+                )
 
-# COMPLETE WEIGHMENT SECTION - Replace everything from "Weighment Information" to elements.append(Spacer)
+                for i, record in enumerate(records_data):
+                    if i > 0:
+                        elements.append(PageBreak())
 
-# Weighment Information
-                elements.append(Paragraph("WEIGHMENT DETAILS", section_header_style))
+                    # Get agency information from address config
+                    agency_name = record.get('agency_name', 'Unknown Agency')
+                    agency_info = self.address_config.get('agencies', {}).get(agency_name, {})
+                    
+                    # Header Section with Agency Info
+                    elements.append(Paragraph(agency_info.get('name', agency_name), header_style))
+                    
+                    if agency_info.get('address'):
+                        address_text = agency_info.get('address', '').replace('\n', '<br/>')
+                        elements.append(Paragraph(address_text, subheader_style))
+                    
+                    # Contact information
+                    contact_info = []
+                    if agency_info.get('contact'):
+                        contact_info.append(f"Phone: {agency_info.get('contact')}")
+                    if agency_info.get('email'):
+                        contact_info.append(f"Email: {agency_info.get('email')}")
+                    
+                    if contact_info:
+                        elements.append(Paragraph(" | ".join(contact_info), subheader_style))
+                    
+                    elements.append(Spacer(1, 0.2*inch))
 
-                # Simple test version - no complex formatting
-                first_weight_str = record.get('first_weight', '').strip()
-                second_weight_str = record.get('second_weight', '').strip()
-                net_weight_str = record.get('net_weight', '').strip()
+                    # Print date and ticket information
+                    print_date = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                    ticket_no = record.get('ticket_no', '000')
+                    
+                    elements.append(Paragraph(f"Print Date: {print_date}", value_style))
+                    elements.append(Paragraph(f"Ticket No: {ticket_no}", header_style))
+                    elements.append(Spacer(1, 0.15*inch))
 
-                # Force calculate net weight
-                if first_weight_str and second_weight_str:
-                    try:
-                        first_weight = float(first_weight_str)
-                        second_weight = float(second_weight_str)
-                        calculated_net = abs(first_weight - second_weight)
-                        net_weight_str = f"{calculated_net:.2f}"
-                    except:
-                        net_weight_str = "Error"
+                    # Vehicle Information (keeping existing code)
+                    elements.append(Paragraph("VEHICLE INFORMATION", section_header_style))
+                    
+                    material_value = record.get('material', '') or record.get('material_type', '')
+                    user_name_value = record.get('user_name', '') or "Not specified"
+                    site_incharge_value = record.get('site_incharge', '') or "Not specified"
+                    
+                    vehicle_data = [
+                        [Paragraph("<b>Vehicle No:</b>", label_style), Paragraph(record.get('vehicle_no', ''), value_style), 
+                        Paragraph("<b>Date:</b>", label_style), Paragraph(record.get('date', ''), value_style), 
+                        Paragraph("<b>Time:</b>", label_style), Paragraph(record.get('time', ''), value_style)],
+                        [Paragraph("<b>Material:</b>", label_style), Paragraph(material_value, value_style), 
+                        Paragraph("<b>Site Name:</b>", label_style), Paragraph(record.get('site_name', ''), value_style), 
+                        Paragraph("<b>Transfer Party:</b>", label_style), Paragraph(record.get('transfer_party_name', ''), value_style)],
+                        [Paragraph("<b>Agency Name:</b>", label_style), Paragraph(record.get('agency_name', ''), value_style), 
+                        Paragraph("<b>User Name:</b>", label_style), Paragraph(user_name_value, value_style), 
+                        Paragraph("<b>Site Incharge:</b>", label_style), Paragraph(site_incharge_value, value_style)]
+                    ]
+                    
+                    vehicle_inner_table = Table(vehicle_data, colWidths=[1.2*inch, 1.3*inch, 1.0*inch, 1.3*inch, 1.2*inch, 1.5*inch])
+                    vehicle_inner_table.setStyle(TableStyle([
+                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,0), (-1,-1), 13),
+                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 2),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+                        ('TOPPADDING', (0,0), (-1,-1), 4),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ]))
+                    
+                    vehicle_table = Table([[vehicle_inner_table]], colWidths=[7.5*inch])
+                    vehicle_table.setStyle(TableStyle([
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('LEFTPADDING', (0,0), (-1,-1), 12),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 12),
+                        ('TOPPADDING', (0,0), (-1,-1), 8),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ]))
+                    elements.append(vehicle_table)
+                    elements.append(Spacer(1, 0.15*inch))
 
-                # Simple display values - NO fancy formatting
-                first_display = f"{first_weight_str} kg" if first_weight_str else "Not captured"
-                second_display = f"{second_weight_str} kg" if second_weight_str else "Not captured"
-                net_display = f"{net_weight_str} kg" if net_weight_str else "Not calculated"
+                    # Weighment Information (keeping existing code)
+                    elements.append(Paragraph("WEIGHMENT DETAILS", section_header_style))
 
-                self.logger.info(f"SIMPLE TEST - Net display: '{net_display}'")
+                    first_weight_str = record.get('first_weight', '').strip()
+                    second_weight_str = record.get('second_weight', '').strip()
+                    net_weight_str = record.get('net_weight', '').strip()
 
-                # Create simple table data - NO Paragraph objects for net weight
-                weighment_data = [
-                    ["First Weight:", first_display, "First Time:", record.get('first_timestamp', '') or "Not captured"],
-                    ["Second Weight:", second_display, "Second Time:", record.get('second_timestamp', '') or "Not captured"],
-                    ["", "", "Net Weight:", net_display]  # Plain string, no Paragraph
-                ]
+                    # Force calculate net weight
+                    if first_weight_str and second_weight_str:
+                        try:
+                            first_weight = float(first_weight_str)
+                            second_weight = float(second_weight_str)
+                            calculated_net = abs(first_weight - second_weight)
+                            net_weight_str = f"{calculated_net:.2f}"
+                        except:
+                            net_weight_str = "Error"
 
-                # Simple table creation
-                weighment_inner_table = Table(weighment_data, colWidths=[1.5*inch, 1.5*inch, 1.2*inch, 2.8*inch])
-                weighment_inner_table.setStyle(TableStyle([
-                    ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                    ('FONTSIZE', (0,0), (-1,-1), 11),
-                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('GRID', (0,0), (-1,-1), 1, colors.black),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('TOPPADDING', (0,0), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-                    # Make net weight bold
-                    ('FONTNAME', (2,2), (3,2), 'Helvetica-Bold'),
-                    ('FONTSIZE', (2,2), (3,2), 12),
-                ]))
+                    # Simple display values
+                    first_display = f"{first_weight_str} kg" if first_weight_str else "Not captured"
+                    second_display = f"{second_weight_str} kg" if second_weight_str else "Not captured"
+                    net_display = f"{net_weight_str} kg" if net_weight_str else "Not calculated"
 
-                # Continue with your existing table wrapper code
-                weighment_table = Table([[weighment_inner_table]], colWidths=[7*inch])
-                # Add to elements
-                elements.append(weighment_table)
-                elements.append(Spacer(1, 0.15*inch))
+                    weighment_data = [
+                        ["First Weight:", first_display, "First Time:", record.get('first_timestamp', '') or "Not captured"],
+                        ["Second Weight:", second_display, "Second Time:", record.get('second_timestamp', '') or "Not captured"],
+                        ["", "", "Net Weight:", net_display]
+                    ]
 
-                # 4-Image Grid Section - FIXED IMAGE HANDLING
-                elements.append(Paragraph("VEHICLE IMAGES (4-Image System)", section_header_style))
-                
-                # Get all 4 image paths with validation
-                image_paths = [
-                    (record.get('first_front_image', ''), f"Ticket: {ticket_no}"),
-                    (record.get('first_back_image', ''), f"Ticket: {ticket_no}"),
-                    (record.get('second_front_image', ''), f"Ticket: {ticket_no}"),
-                    (record.get('second_back_image', ''), f"Ticket: {ticket_no}")
-                ]
+                    weighment_inner_table = Table(weighment_data, colWidths=[1.5*inch, 1.5*inch, 1.2*inch, 2.8*inch])
+                    weighment_inner_table.setStyle(TableStyle([
+                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,0), (-1,-1), 11),
+                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('LEFTPADDING', (0,0), (-1,-1), 6),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                        ('TOPPADDING', (0,0), (-1,-1), 6),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                        ('FONTNAME', (2,2), (3,2), 'Helvetica-Bold'),
+                        ('FONTSIZE', (2,2), (3,2), 12),
+                    ]))
 
-                # Create 2x2 image grid with headers
-                img_data = [
-                    ["1ST WEIGHMENT - FRONT", "1ST WEIGHMENT - BACK"],
-                    [None, None],  # Will be filled with first weighment images
-                    ["2ND WEIGHMENT - FRONT", "2ND WEIGHMENT - BACK"], 
-                    [None, None]   # Will be filled with second weighment images
-                ]
+                    weighment_table = Table([[weighment_inner_table]], colWidths=[7*inch])
+                    elements.append(weighment_table)
+                    elements.append(Spacer(1, 0.15*inch))
 
-                # Process all 4 images with better error handling
-                processed_images = []
-                
-                for img_filename, watermark_text in image_paths:
-                    if img_filename and img_filename.strip():
-                        # Build full path
-                        img_path = os.path.join(config.IMAGES_FOLDER, img_filename.strip())
-                        
-                        if os.path.exists(img_path):
-                            try:
-                                temp_img_path = self.prepare_image_for_pdf(img_path, watermark_text)
-                                if temp_img_path and os.path.exists(temp_img_path):
-                                    processed_img = RLImage(temp_img_path, width=3.5*inch, height=2.0*inch)
-                                    processed_images.append(processed_img)
-                                    temp_files_to_cleanup.append(temp_img_path)  # Track for cleanup
-                                    self.logger.debug(f"Successfully processed image: {img_filename}")
-                                else:
-                                    processed_images.append("Image processing failed")
-                                    self.logger.warning(f"Failed to process image: {img_filename}")
-                            except Exception as e:
-                                self.logger.error(f"Error processing image {img_filename}: {e}")
-                                processed_images.append("Image processing error")
+                    # FIXED: 4-Image Grid Section with better error handling
+                    elements.append(Paragraph("VEHICLE IMAGES (4-Image System)", section_header_style))
+                    
+                    # Get all 4 image paths with validation
+                    image_paths = [
+                        (record.get('first_front_image', ''), f"Ticket: {ticket_no}"),
+                        (record.get('first_back_image', ''), f"Ticket: {ticket_no}"),
+                        (record.get('second_front_image', ''), f"Ticket: {ticket_no}"),
+                        (record.get('second_back_image', ''), f"Ticket: {ticket_no}")
+                    ]
+
+                    # Create 2x2 image grid with headers
+                    img_data = [
+                        ["1ST WEIGHMENT - FRONT", "1ST WEIGHMENT - BACK"],
+                        [None, None],  # Will be filled with first weighment images
+                        ["2ND WEIGHMENT - FRONT", "2ND WEIGHMENT - BACK"], 
+                        [None, None]   # Will be filled with second weighment images
+                    ]
+
+                    # FIXED: Process all 4 images with enhanced error handling
+                    processed_images = []
+                    
+                    for idx, (img_filename, watermark_text) in enumerate(image_paths):
+                        if img_filename and img_filename.strip():
+                            # Build full path
+                            img_path = os.path.join(config.IMAGES_FOLDER, img_filename.strip())
+                            
+                            if os.path.exists(img_path):
+                                try:
+                                    # Use the fixed prepare_image_for_pdf method
+                                    temp_img_path = self.prepare_image_for_pdf(img_path, watermark_text)
+                                    if temp_img_path and os.path.exists(temp_img_path):
+                                        # Create RLImage with error protection
+                                        processed_img = None
+                                        try:
+                                            processed_img = RLImage(temp_img_path, width=3.5*inch, height=2.0*inch)
+                                            processed_images.append(processed_img)
+                                            temp_files_to_cleanup.append(temp_img_path)
+                                            self.logger.debug(f"Successfully processed image {idx+1}: {img_filename}")
+                                        except Exception as rl_error:
+                                            self.logger.error(f"ReportLab error creating image {idx+1}: {rl_error}")
+                                            processed_images.append(f"Image {idx+1} processing failed")
+                                            # Clean up the temp file since we couldn't use it
+                                            try:
+                                                if os.path.exists(temp_img_path):
+                                                    os.remove(temp_img_path)
+                                            except:
+                                                pass
+                                    else:
+                                        processed_images.append(f"Image {idx+1} processing failed")
+                                        self.logger.warning(f"Failed to process image {idx+1}: {img_filename}")
+                                except Exception as e:
+                                    error_str = str(e)
+                                    if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
+                                        self.logger.error(f"File I/O error processing image {idx+1} {img_filename}: {e}")
+                                        processed_images.append(f"Image {idx+1} I/O error")
+                                    else:
+                                        self.logger.error(f"Error processing image {idx+1} {img_filename}: {e}")
+                                        processed_images.append(f"Image {idx+1} error")
+                            else:
+                                processed_images.append(f"Image {idx+1} not found")
+                                self.logger.warning(f"Image file not found: {img_path}")
                         else:
-                            processed_images.append("Image file not found")
-                            self.logger.warning(f"Image file not found: {img_path}")
-                    else:
-                        processed_images.append("No image captured")
-                        self.logger.debug("No image filename provided")
+                            processed_images.append(f"No image {idx+1} captured")
+                            self.logger.debug(f"No image filename provided for position {idx+1}")
 
-                # Fill the image grid
-                img_data[1] = [processed_images[0], processed_images[1]]  # First weighment
-                img_data[3] = [processed_images[2], processed_images[3]]  # Second weighment
+                    # Fill the image grid
+                    img_data[1] = [processed_images[0], processed_images[1]]  # First weighment
+                    img_data[3] = [processed_images[2], processed_images[3]]  # Second weighment
 
-                # Create images table with 2x2 grid
-                img_table = Table(img_data, colWidths=[3.5*inch, 3.5*inch], 
-                                rowHeights=[0.3*inch, 2*inch, 0.3*inch, 2*inch])
-                img_table.setStyle(TableStyle([
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                    ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (1,0), 10),  # Header row 1
-                    ('FONTSIZE', (0,2), (1,2), 10),  # Header row 2
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('TOPPADDING', (0,0), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-                    # Header background
-                    ('BACKGROUND', (0,0), (1,0), colors.lightgrey),
-                    ('BACKGROUND', (0,2), (1,2), colors.lightgrey),
-                ]))
-                elements.append(img_table)
-                
-                # Add operator signature line at bottom right
-                elements.append(Spacer(1, 0.3*inch))
-                
-                signature_table = Table([["", "Operator's Signature"]], colWidths=[5*inch, 2.5*inch])
-                signature_table.setStyle(TableStyle([
-                    ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                    ('FONTSIZE', (0,0), (-1,-1), 11),
-                    ('ALIGN', (1,0), (1,0), 'RIGHT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('LEFTPADDING', (0,0), (-1,-1), 0),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 0),
-                    ('TOPPADDING', (0,0), (-1,-1), 0),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-                ]))
-                elements.append(signature_table)
+                    # Create images table with 2x2 grid
+                    img_table = Table(img_data, colWidths=[3.5*inch, 3.5*inch], 
+                                    rowHeights=[0.3*inch, 2*inch, 0.3*inch, 2*inch])
+                    img_table.setStyle(TableStyle([
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0,0), (1,0), 10),  # Header row 1
+                        ('FONTSIZE', (0,2), (1,2), 10),  # Header row 2
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 6),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                        ('TOPPADDING', (0,0), (-1,-1), 6),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                        # Header background
+                        ('BACKGROUND', (0,0), (1,0), colors.lightgrey),
+                        ('BACKGROUND', (0,2), (1,2), colors.lightgrey),
+                    ]))
+                    elements.append(img_table)
+                    
+                    # Add operator signature line at bottom right
+                    elements.append(Spacer(1, 0.3*inch))
+                    
+                    signature_table = Table([["", "Operator's Signature"]], colWidths=[5*inch, 2.5*inch])
+                    signature_table.setStyle(TableStyle([
+                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,0), (-1,-1), 11),
+                        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 0),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                        ('TOPPADDING', (0,0), (-1,-1), 0),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+                    ]))
+                    elements.append(signature_table)
 
-            # Build the PDF
-            self.logger.info(f"Building PDF document: {save_path}")
-            doc.build(elements)
-            
-            # Clean up temporary files
-            for temp_file in temp_files_to_cleanup:
+                # Build the PDF with error protection
+                self.logger.info(f"Building PDF document: {save_path}")
                 try:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        self.logger.debug(f"Cleaned up temporary file: {temp_file}")
-                except Exception as cleanup_error:
-                    self.logger.warning(f"Could not clean up temporary file {temp_file}: {cleanup_error}")
-            
-            # Verify PDF was created
-            if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
-                self.logger.info(f"PDF created successfully: {save_path} ({os.path.getsize(save_path)} bytes)")
-                return True
-            else:
-                self.logger.error(f"PDF was not created or is empty: {save_path}")
-                return False
+                    doc.build(elements)
+                    self.logger.info("PDF document built successfully")
+                except Exception as build_error:
+                    self.logger.error(f"Error building PDF document: {build_error}")
+                    raise build_error
                 
+                # Clean up temporary files with enhanced error handling
+                cleanup_errors = []
+                for temp_file in temp_files_to_cleanup:
+                    try:
+                        if os.path.exists(temp_file):
+                            os.remove(temp_file)
+                            self.logger.debug(f"Cleaned up temporary file: {temp_file}")
+                    except Exception as cleanup_error:
+                        cleanup_errors.append(f"{temp_file}: {cleanup_error}")
+                        self.logger.warning(f"Could not clean up temporary file {temp_file}: {cleanup_error}")
+                
+                if cleanup_errors:
+                    self.logger.warning(f"Some temporary files could not be cleaned up: {cleanup_errors}")
+                
+                # Verify PDF was created
+                if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+                    self.logger.info(f"PDF created successfully: {save_path} ({os.path.getsize(save_path)} bytes)")
+                    return True
+                else:
+                    self.logger.error(f"PDF was not created or is empty: {save_path}")
+                    return False
+                    
         except Exception as e:
-            self.logger.error(f"Error creating PDF report: {e}")
+            error_str = str(e)
+            if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
+                self.logger.error(f"File I/O error creating PDF report: {e}")
+            else:
+                self.logger.error(f"Error creating PDF report: {e}")
             import traceback
             self.logger.error(f"PDF generation traceback: {traceback.format_exc()}")
             return False
     
     def prepare_image_for_pdf(self, image_path, watermark_text):
-        """Prepare image for PDF by resizing and adding watermark - FIXED path handling"""
+        """FIXED: Prepare image for PDF by resizing and adding watermark with I/O error protection"""
         try:
-            # Validate input path
-            if not image_path or not os.path.exists(image_path):
-                self.logger.warning(f"Image path does not exist: {image_path}")
-                return None
-            
-            self.logger.debug(f"Preparing image for PDF: {image_path}")
-            
-            # Read image with error handling
-            img = cv2.imread(image_path)
-            if img is None:
-                self.logger.warning(f"Could not read image: {image_path}")
-                return None
-            
-            # Resize image for PDF (maintain aspect ratio)
-            height, width = img.shape[:2]
-            max_width = 400
-            max_height = 300
-            
-            # Calculate scaling factor
-            scale_w = max_width / width
-            scale_h = max_height / height
-            scale = min(scale_w, scale_h)
-            
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            
-            img_resized = cv2.resize(img, (new_width, new_height))
-            
-            # Add watermark
-            try:
-                from camera import add_watermark  # Import the watermark function
-                watermarked_img = add_watermark(img_resized, watermark_text)
-            except ImportError:
-                # Fallback if watermark function not available
-                self.logger.warning("Watermark function not available, using image without watermark")
-                watermarked_img = img_resized
-            except Exception as watermark_error:
-                self.logger.warning(f"Watermark error: {watermark_error}, using image without watermark")
-                watermarked_img = img_resized
-            
-            # Create unique temporary filename with proper path
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            temp_filename = f"temp_pdf_image_{timestamp}.jpg"
-            
-            # Ensure images folder exists
-            os.makedirs(config.IMAGES_FOLDER, exist_ok=True)
-            temp_path = os.path.join(config.IMAGES_FOLDER, temp_filename)
-            
-            # Save temporary file with error handling
-            success = cv2.imwrite(temp_path, watermarked_img)
-            
-            if not success:
-                self.logger.error(f"Failed to save temporary image: {temp_path}")
-                return None
-            
-            # Verify the file was created and is readable
-            if not os.path.exists(temp_path):
-                self.logger.error(f"Temporary image was not created: {temp_path}")
-                return None
-            
-            # Verify file size
-            if os.path.getsize(temp_path) == 0:
-                self.logger.error(f"Temporary image is empty: {temp_path}")
-                os.remove(temp_path)  # Clean up empty file
-                return None
-            
-            self.logger.debug(f"Successfully prepared temporary image: {temp_path}")
-            return temp_path
-            
+            with safe_image_operation():
+                # Validate input path
+                if not image_path or not os.path.exists(image_path):
+                    self.logger.warning(f"Image path does not exist: {image_path}")
+                    return None
+                
+                self.logger.debug(f"Preparing image for PDF: {image_path}")
+                
+                # Read image with error handling and retry mechanism
+                img = None
+                for retry in range(3):  # Try up to 3 times
+                    try:
+                        img = cv2.imread(image_path)
+                        if img is not None:
+                            break
+                        elif retry < 2:  # Not the last retry
+                            time.sleep(0.1)  # Wait 100ms before retry
+                    except Exception as read_error:
+                        if retry < 2:  # Not the last retry
+                            self.logger.warning(f"Retry {retry + 1}: Error reading image {image_path}: {read_error}")
+                            time.sleep(0.1)
+                            continue
+                        else:
+                            raise read_error
+                
+                if img is None:
+                    self.logger.warning(f"Could not read image after retries: {image_path}")
+                    return None
+                
+                # Resize image for PDF (maintain aspect ratio)
+                height, width = img.shape[:2]
+                max_width = 400
+                max_height = 300
+                
+                # Calculate scaling factor
+                scale_w = max_width / width
+                scale_h = max_height / height
+                scale = min(scale_w, scale_h)
+                
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                
+                img_resized = cv2.resize(img, (new_width, new_height))
+                
+                # Add watermark with error protection
+                watermarked_img = img_resized  # Default fallback
+                try:
+                    from camera import add_watermark
+                    watermarked_img = add_watermark(img_resized, watermark_text)
+                    self.logger.debug("Watermark added successfully")
+                except ImportError:
+                    self.logger.warning("Watermark function not available, using image without watermark")
+                except Exception as watermark_error:
+                    # Check if it's a file I/O error
+                    if "closed file" in str(watermark_error).lower() or "I/O operation" in str(watermark_error).lower():
+                        self.logger.warning(f"File I/O error in watermark - using image without watermark: {watermark_error}")
+                    else:
+                        self.logger.warning(f"Watermark error: {watermark_error}, using image without watermark")
+                
+                # Create unique temporary filename with proper path
+                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                temp_filename = f"temp_pdf_image_{timestamp}.jpg"
+                
+                # Ensure images folder exists
+                os.makedirs(config.IMAGES_FOLDER, exist_ok=True)
+                temp_path = os.path.join(config.IMAGES_FOLDER, temp_filename)
+                
+                # Save temporary file with error handling and retries
+                success = False
+                for retry in range(3):  # Try up to 3 times
+                    try:
+                        success = cv2.imwrite(temp_path, watermarked_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                        if success:
+                            break
+                        elif retry < 2:  # Not the last retry
+                            time.sleep(0.1)  # Wait 100ms before retry
+                    except Exception as write_error:
+                        if retry < 2:  # Not the last retry
+                            self.logger.warning(f"Retry {retry + 1}: Error writing temp image: {write_error}")
+                            time.sleep(0.1)
+                            continue
+                        else:
+                            self.logger.error(f"Failed to write temporary image after retries: {write_error}")
+                            return None
+                
+                if not success:
+                    self.logger.error(f"Failed to save temporary image: {temp_path}")
+                    return None
+                
+                # Verify the file was created and is readable
+                if not os.path.exists(temp_path):
+                    self.logger.error(f"Temporary image was not created: {temp_path}")
+                    return None
+                
+                # Verify file size
+                try:
+                    file_size = os.path.getsize(temp_path)
+                    if file_size == 0:
+                        self.logger.error(f"Temporary image is empty: {temp_path}")
+                        try:
+                            os.remove(temp_path)  # Clean up empty file
+                        except:
+                            pass
+                        return None
+                except OSError as size_error:
+                    self.logger.error(f"Could not check file size: {temp_path} - {size_error}")
+                    return None
+                
+                self.logger.debug(f"Successfully prepared temporary image: {temp_path}")
+                return temp_path
+                
         except Exception as e:
-            self.logger.error(f"Error preparing image for PDF: {e}")
+            # Enhanced error reporting for debugging
+            error_str = str(e)
+            if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
+                self.logger.error(f"File I/O error preparing image for PDF: {e}")
+            else:
+                self.logger.error(f"Error preparing image for PDF: {e}")
             return None
 
     # ========== CLOUD STORAGE METHODS (ONLY USED WHEN EXPLICITLY REQUESTED) ==========

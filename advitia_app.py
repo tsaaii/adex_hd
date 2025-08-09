@@ -1208,6 +1208,21 @@ class TharuniApp:
                     print(f"[CRITICAL-ERROR-DIALOG] Critical error in save_record: {e}")
             except Exception:
                 print(f"[CRITICAL-ERROR-DIALOG] Critical error in save_record: {e}")
+        
+            print("🔄 DEBUG: Updating summary and pending vehicles after save")
+            try:
+                self.update_summary()
+                print("✅ DEBUG: Summary updated successfully")
+            except Exception as summary_error:
+                print(f"⚠️ DEBUG: Error updating summary: {summary_error}")
+                
+            try:
+                self.update_pending_vehicles()
+                print("✅ DEBUG: Pending vehicles updated successfully")
+            except Exception as pending_error:
+                print(f"⚠️ DEBUG: Error updating pending vehicles: {pending_error}")
+
+        
         finally:
             print("🎫 TICKET FLOW DEBUG: " + "="*50)
             # SAFE FINAL LOGGING
@@ -1312,62 +1327,98 @@ class TharuniApp:
 
 
     def load_pending_vehicle(self, ticket_no):
-        """Load a pending ticket for second weighment with safe file handling"""
+        """Load a pending ticket for second weighment - FIXED without problematic context manager"""
         try:
+            print(f"🔍 DEBUG: Loading pending vehicle with ticket_no: '{ticket_no}'")
+            
             if not hasattr(self, 'data_manager') or not self.data_manager:
-                print(f"No data manager available for loading ticket {ticket_no}")
+                print(f"❌ DEBUG: No data manager available for loading ticket {ticket_no}")
                 return False
             
-            # Use safe_csv_operation to prevent file conflicts
-            with safe_csv_operation():
-                records = self.data_manager.get_filtered_records(ticket_no)
+            # REMOVED: Don't use safe_csv_operation here - it interferes with later save operations
+            print(f"🔍 DEBUG: Calling get_filtered_records for ticket: '{ticket_no}'")
+            records = self.data_manager.get_filtered_records(ticket_no)
+            print(f"🔍 DEBUG: Retrieved {len(records)} records")
+            
+            # Debug: Print all ticket numbers we found
+            for i, record in enumerate(records):
+                found_ticket = record.get('ticket_no', 'NO_TICKET')
+                print(f"🔍 DEBUG: Record {i}: ticket_no = '{found_ticket}'")
+            
+            for record in records:
+                found_ticket_no = record.get('ticket_no', '')
+                print(f"🔍 DEBUG: Comparing '{found_ticket_no}' with '{ticket_no}'")
                 
-                for record in records:
-                    if record.get('ticket_no') == ticket_no:
-                        first_weight = record.get('first_weight', '').strip()
-                        first_timestamp = record.get('first_timestamp', '').strip()
-                        second_weight = record.get('second_weight', '').strip()
-                        second_timestamp = record.get('second_timestamp', '').strip()
+                if found_ticket_no == ticket_no:
+                    print(f"✅ DEBUG: Found matching ticket!")
+                    first_weight = record.get('first_weight', '').strip()
+                    first_timestamp = record.get('first_timestamp', '').strip()
+                    second_weight = record.get('second_weight', '').strip()
+                    second_timestamp = record.get('second_timestamp', '').strip()
+                    
+                    print(f"🔍 DEBUG: first_weight='{first_weight}', first_timestamp='{first_timestamp}'")
+                    print(f"🔍 DEBUG: second_weight='{second_weight}', second_timestamp='{second_timestamp}'")
+                    
+                    if second_weight and second_timestamp:
+                        # Already completed
+                        messagebox.showinfo("Completed Record", 
+                                        "This ticket already has both weighments completed.")
+                        return False
+                    
+                    elif first_weight and first_timestamp:
+                        # Load pending record for second weighment
+                        print(f"✅ DEBUG: Loading pending ticket {ticket_no} for second weighment")
                         
-                        if second_weight and second_timestamp:
-                            # Already completed
-                            messagebox.showinfo("Completed Record", 
-                                            "This ticket already has both weighments completed.")
-                            self.load_record_data(record)
-                            self.current_weighment = "second"
-                            self.weighment_state_var.set("Weighment Complete")
-                            return True
-                        elif first_weight and first_timestamp:
-                            # Ready for second weighment
-                            print(f"Loading pending ticket {ticket_no} for second weighment")
-                            self.load_record_data(record)
-                            self.current_weighment = "second"
-                            self.weighment_state_var.set("Second Weighment")
+                        # Load the record data into the main form
+                        if hasattr(self, 'main_form') and self.main_form:
+                            print(f"✅ DEBUG: Main form found, loading record data")
+                            self.main_form.load_record_data(record)
+                            
+                            # Set the form state for second weighment
+                            self.main_form.current_weighment = "second"
+                            self.main_form.weighment_state_var.set("Second Weighment")
+                            
+                            # Switch to the main form tab (tab index 0)
+                            if hasattr(self, 'notebook') and self.notebook:
+                                print(f"✅ DEBUG: Switching to main form tab")
+                                self.notebook.select(0)
+                            
+                            print(f"✅ DEBUG: Successfully loaded pending ticket {ticket_no}")
+                            
+                            # Show success message
+                            messagebox.showinfo("Pending Record Loaded", 
+                                            f"Loaded ticket {ticket_no} for second weighment.\n"
+                                            f"Vehicle: {record.get('vehicle_no', 'N/A')}\n"
+                                            f"First Weight: {first_weight} kg\n"
+                                            f"Ready to capture second weight and images.")
+                            
                             return True
                         else:
-                            print(f"Ticket {ticket_no} doesn't have valid first weighment data")
+                            print("❌ DEBUG: Main form not available")
+                            messagebox.showerror("System Error", "Main form not available")
                             return False
-                
-                print(f"No matching record found for ticket {ticket_no}")
-                return False
-                
+                    
+                    else:
+                        # No first weighment - shouldn't be in pending list
+                        print(f"⚠️ DEBUG: Ticket {ticket_no} has no first weighment data")
+                        messagebox.showwarning("Invalid Record", 
+                                            f"Ticket {ticket_no} has no first weighment data.")
+                        return False
+            
+            # Ticket not found
+            print(f"❌ DEBUG: Ticket {ticket_no} not found in {len(records)} records")
+            messagebox.showerror("Ticket Not Found", 
+                            f"Ticket {ticket_no} not found in records.\n"
+                            f"Searched through {len(records)} records.")
+            return False
+            
         except Exception as e:
-            if "closed file" in str(e).lower() or "i/o operation" in str(e).lower():
-                print(f"File I/O error loading ticket {ticket_no}: {e}")
-                # Retry once after a brief delay
-                try:
-                    import time
-                    time.sleep(0.5)
-                    return self.load_pending_ticket(ticket_no)  # Single retry
-                except:
-                    messagebox.showerror("File Access Error", 
-                                    f"Unable to load ticket {ticket_no} due to file access conflict.\n"
-                                    "Please try again in a moment.")
-                    return False
-            else:
-                print(f"Error loading pending ticket {ticket_no}: {e}")
-                messagebox.showerror("Error", f"Error loading ticket {ticket_no}: {str(e)}")
-                return False
+            print(f"❌ DEBUG: Error loading pending vehicle {ticket_no}: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Loading Error", 
+                            f"Failed to load ticket {ticket_no}:\n{str(e)}")
+            return False
 
     def create_header(self, parent):
             """Create compressed header with all info in single line"""
@@ -1601,11 +1652,16 @@ class TharuniApp:
             self.logger.error(f"Error updating camera settings: {e}")
 
     def update_summary(self):
-        """Update the summary view with error handling"""
+        """Update the summary view with error handling - ENHANCED"""
         try:
-            if hasattr(self, 'summary_panel'):
+            print("🔄 DEBUG: Calling summary panel update...")
+            if hasattr(self, 'summary_panel') and self.summary_panel:
                 self.summary_panel.update_summary()
+                print("✅ DEBUG: Summary panel updated successfully")
+            else:
+                print("⚠️ DEBUG: No summary panel available")
         except Exception as e:
+            print(f"❌ DEBUG: Error updating summary: {e}")
             self.logger.error(f"Error updating summary: {e}")
 
     def view_records(self):

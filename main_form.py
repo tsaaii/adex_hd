@@ -1589,27 +1589,27 @@ class MainForm:
             print(f"Error getting ticket info: {e}")
             return {"current_ticket": "T0001"}
     
-    def load_pending_ticket(self, ticket_no):
-        """Load a pending ticket for second weighment"""
-        if hasattr(self, 'data_manager') and self.data_manager:
-            records = self.data_manager.get_filtered_records(ticket_no)
-            for record in records:
-                if record.get('ticket_no') == ticket_no:
-                    if record.get('second_weight') and record.get('second_timestamp'):
-                        # Already completed
-                        messagebox.showinfo("Completed Record", 
-                                        "This ticket already has both weighments completed.")
-                        self.load_record_data(record)
-                        self.current_weighment = "second"
-                        self.weighment_state_var.set("Weighment Complete")
-                        return True
-                    elif record.get('first_weight') and record.get('first_timestamp'):
-                        # Ready for second weighment
-                        self.load_record_data(record)
-                        self.current_weighment = "second"
-                        self.weighment_state_var.set("Second Weighment")
-                        return True
-        return False
+    # def load_pending_ticket(self, ticket_no):
+    #     """Load a pending ticket for second weighment"""
+    #     if hasattr(self, 'data_manager') and self.data_manager:
+    #         records = self.data_manager.get_filtered_records(ticket_no)
+    #         for record in records:
+    #             if record.get('ticket_no') == ticket_no:
+    #                 if record.get('second_weight') and record.get('second_timestamp'):
+    #                     # Already completed
+    #                     messagebox.showinfo("Completed Record", 
+    #                                     "This ticket already has both weighments completed.")
+    #                     self.load_record_data(record)
+    #                     self.current_weighment = "second"
+    #                     self.weighment_state_var.set("Weighment Complete")
+    #                     return True
+    #                 elif record.get('first_weight') and record.get('first_timestamp'):
+    #                     # Ready for second weighment
+    #                     self.load_record_data(record)
+    #                     self.current_weighment = "second"
+    #                     self.weighment_state_var.set("Second Weighment")
+    #                     return True
+    #     return False
 
     def init_variables(self):
         """Initialize form variables including 4 image paths"""

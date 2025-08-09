@@ -133,48 +133,7 @@ class SummaryPanel:
                                 command=self.view_entry_details)
         details_btn.pack(side=tk.LEFT, padx=5)
     
-    def update_summary(self):
-        """Update the summary tree with recent records"""
-        # Clear existing items
-        for item in self.summary_tree.get_children():
-            self.summary_tree.delete(item)
-            
-        if not self.data_manager:
-            return
-            
-        # Get records with filter applied
-        filter_text = self.filter_var.get()
-        records = self.data_manager.get_filtered_records(filter_text)
-        
-        # Show most recent first (limited to 300 for performance)
-        for i, record in enumerate(reversed(records[-300:])):
-            # Check for images
-            image_info = "None"
-            front_img = record.get('front_image', '')
-            back_img = record.get('back_image', '')
-            
-            if front_img and back_img:
-                image_info = "F & B"
-            elif front_img:
-                image_info = "Front"
-            elif back_img:
-                image_info = "Back"
-            
-            # Add to treeview
-            self.summary_tree.insert("", tk.END, values=(
-                record.get('date', ''),
-                record.get('vehicle_no', ''),
-                record.get('ticket_no', ''),
-                record.get('agency_name', ''),
-                record.get('material', ''),
-                record.get('first_weight', ''),
-                record.get('second_weight', ''),
-                record.get('net_weight', ''),
-                image_info
-            ))
-        
-        # Alternate row colors
-        self._apply_row_colors()
+
     
     def _apply_row_colors(self):
         """Apply alternating row colors to treeview"""
@@ -187,8 +146,78 @@ class SummaryPanel:
         self.summary_tree.tag_configure("evenrow", background=config.COLORS["table_row_even"])
         self.summary_tree.tag_configure("oddrow", background=config.COLORS["table_row_odd"])
     
+    def update_summary(self):
+        """Update the summary tree with recent records - FIXED header mapping"""
+        # Clear existing items
+        for item in self.summary_tree.get_children():
+            self.summary_tree.delete(item)
+            
+        if not self.data_manager:
+            return
+            
+        # Get records with filter applied
+        filter_text = self.filter_var.get()
+        records = self.data_manager.get_filtered_records(filter_text)
+        
+        print(f"🔍 SUMMARY DEBUG: Retrieved {len(records)} records for display")
+        
+        # Show most recent first (limited to 300 for performance)
+        recent_records = records[-300:] if len(records) > 300 else records
+        recent_records.reverse()  # Most recent first
+        
+        for record in recent_records:
+            # FIXED: Map CSV headers (with spaces) to the data we need
+            # CSV headers: 'Date', 'Time', 'Site Name', 'Agency Name', 'Material', 'Ticket No', 'Vehicle No', etc.
+            
+            try:
+                # Handle both old format (underscores) and new format (spaces) for compatibility
+                date = record.get('Date', '') or record.get('date', '')
+                vehicle = record.get('Vehicle No', '') or record.get('vehicle_no', '')
+                ticket = record.get('Ticket No', '') or record.get('ticket_no', '')
+                agency = record.get('Agency Name', '') or record.get('agency_name', '')
+                material = record.get('Material', '') or record.get('material', '') or record.get('Material Type', '') or record.get('material_type', '')
+                first_weight = record.get('First Weight', '') or record.get('first_weight', '')
+                second_weight = record.get('Second Weight', '') or record.get('second_weight', '')
+                net_weight = record.get('Net Weight', '') or record.get('net_weight', '')
+                
+                # Count images (simplified)
+                image_count = 0
+                for img_field in ['First Front Image', 'First Back Image', 'Second Front Image', 'Second Back Image']:
+                    if record.get(img_field, '').strip():
+                        image_count += 1
+                
+                # Also check old format
+                for img_field in ['first_front_image', 'first_back_image', 'second_front_image', 'second_back_image']:
+                    if record.get(img_field, '').strip():
+                        image_count += 1
+                
+                images_display = f"{image_count}/4"
+                
+                print(f"🔍 SUMMARY DEBUG: Adding record - Ticket: {ticket}, Vehicle: {vehicle}, Agency: {agency}")
+                
+                # Add to tree
+                self.summary_tree.insert("", 0, values=(
+                    date,
+                    vehicle,
+                    ticket,
+                    agency,
+                    material,
+                    first_weight,
+                    second_weight,
+                    net_weight,
+                    images_display
+                ))
+                
+            except Exception as e:
+                print(f"🔍 SUMMARY DEBUG: Error processing record: {e}")
+                print(f"🔍 SUMMARY DEBUG: Record keys: {list(record.keys())}")
+                continue
+        
+        print(f"🔍 SUMMARY DEBUG: Added {len(self.summary_tree.get_children())} records to summary view")
+
     def apply_filter(self, *args):
-        """Apply filter to records"""
+        """Apply filter and refresh display - FIXED"""
+        print(f"🔍 SUMMARY DEBUG: Applying filter: '{self.filter_var.get()}'")
         self.update_summary()
     
     def export_to_excel(self):
