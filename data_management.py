@@ -11,7 +11,32 @@ import config
 import shutil
 from cloud_storage import CloudStorageService
 import config
+import threading
+import time
+from contextlib import contextmanager
 
+# Global file lock for CSV operations
+_csv_file_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
+
+@contextmanager
+def safe_csv_operation(max_retries=3, retry_delay=0.1):
+    """Context manager for safe CSV file operations with retries"""
+    for attempt in range(max_retries):
+        try:
+            with _csv_file_lock:
+                yield
+                break  # Success, exit the retry loop
+        except Exception as e:
+            if "closed file" in str(e).lower() and attempt < max_retries - 1:
+                # Wait a bit and retry for closed file errors
+                time.sleep(retry_delay)
+                continue
+            else:
+                # Re-raise the exception if it's not a closed file error or max retries reached
+                raise
+    else:
+        # This should not happen, but just in case
+        raise RuntimeError("Max retries exceeded for CSV operation")
 # Import PDF generation capabilities
 try:
     from reportlab.lib.pagesizes import letter, A4
@@ -141,10 +166,10 @@ class DataManager:
                 if csv_success:
                     self.logger.info(f" Record {ticket_no} saved to local CSV successfully")
                 else:
-                    self.logger.error(f"❌ Failed to save record {ticket_no} to local CSV")
+                    self.logger.error(f" Failed to save record {ticket_no} to local CSV")
                     return {'success': False, 'error': 'Failed to save to CSV'}
             except Exception as csv_error:
-                self.logger.error(f"❌ Critical error saving to CSV: {csv_error}")
+                self.logger.error(f" Critical error saving to CSV: {csv_error}")
                 return {'success': False, 'error': f'CSV error: {str(csv_error)}'}
             
             # Check if this is a complete record (both weighments)
@@ -232,7 +257,7 @@ class DataManager:
             }
                     
         except Exception as e:
-            self.logger.error(f"❌ Critical error saving record: {e}")
+            self.logger.error(f" Critical error saving record: {e}")
             try:
                 if messagebox:
                     messagebox.showerror("Save Error", f"Failed to save record:\n{str(e)}")
@@ -242,7 +267,7 @@ class DataManager:
 
 
     def get_all_records(self):
-        """FIXED: Get all records with better error handling for archive compatibility"""
+        """Thread-safe version of get_all_records"""
         records = []
         current_file = self.get_current_data_file()
         
@@ -250,24 +275,24 @@ class DataManager:
             self.logger.warning(f"CSV file does not exist: {current_file}")
             return records
             
-        try:
-            with open(current_file, 'r', newline='', encoding='utf-8') as csv_file:
-                reader = csv.reader(csv_file)
-                
-                # Skip header
-                header = next(reader, None)
-                if not header:
-                    self.logger.warning("CSV file has no header")
-                    return records
-                
-                self.logger.debug(f"CSV header: {header}")
-                self.logger.debug(f"Expected header length: {len(config.CSV_HEADER)}")
-                self.logger.debug(f"Actual header length: {len(header)}")
-                
-                for row_num, row in enumerate(reader, 1):
+        with safe_csv_operation():
+            try:
+                with open(current_file, 'r', newline='', encoding='utf-8') as csv_file:
+                    reader = csv.reader(csv_file)
+                    
+                    # Skip header
+                    header = next(reader, None)
+                    if not header:
+                        self.logger.warning("CSV file has no header")
+                        return records
+                    
+                    # Read all records at once to minimize file open time
+                    all_rows = list(reader)
+                    
+                # Process records outside the file context
+                for row_num, row in enumerate(all_rows, 1):
                     try:
                         if len(row) >= 13:  # Minimum fields required
-                            # Handle both old and new CSV formats
                             record = {
                                 'date': row[0] if len(row) > 0 else '',
                                 'time': row[1] if len(row) > 1 else '',
@@ -283,7 +308,6 @@ class DataManager:
                                 'second_timestamp': row[11] if len(row) > 11 else '',
                                 'net_weight': row[12] if len(row) > 12 else '',
                                 'material_type': row[13] if len(row) > 13 else '',
-                                # Handle variable number of image fields
                                 'first_front_image': row[14] if len(row) > 14 else '',
                                 'first_back_image': row[15] if len(row) > 15 else '',
                                 'second_front_image': row[16] if len(row) > 16 else '',
@@ -292,17 +316,16 @@ class DataManager:
                                 'user_name': row[19] if len(row) > 19 else ''
                             }
                             records.append(record)
-                        else:
-                            self.logger.warning(f"Skipping row {row_num} - insufficient data: {len(row)} fields")
                     except Exception as row_error:
-                        self.logger.error(f"Error processing row {row_num}: {row_error}")
+                        self.logger.warning(f"Error processing row {row_num}: {row_error}")
+                        continue
                         
-            self.logger.info(f"Successfully loaded {len(records)} records from {current_file}")
-            return records
+                self.logger.info(f"Successfully loaded {len(records)} records from {current_file}")
+                return records
                 
-        except Exception as e:
-            self.logger.error(f"Error reading records from {current_file}: {e}")
-            return []
+            except Exception as e:
+                self.logger.error(f"Error reading records from {current_file}: {e}")
+                return records
     
     def _setup_fallback_folders(self):
         """Setup fallback folders when main setup fails"""
@@ -1451,14 +1474,12 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
         }
 
     def add_new_record(self, data):
-        """FIXED: Add a new record to the CSV file with enhanced error handling and logging"""
+        """Thread-safe version of add_new_record"""
         try:
-            self.logger.info("Adding new record to CSV")
-            
-            # Ensure all required fields have values
+            # Prepare record as list
             record = [
-                data.get('date', datetime.datetime.now().strftime("%d-%m-%Y")),
-                data.get('time', datetime.datetime.now().strftime("%H:%M:%S")),
+                data.get('date', ''),
+                data.get('time', ''),
                 data.get('site_name', ''),
                 data.get('agency_name', ''),
                 data.get('material', ''),
@@ -1479,25 +1500,23 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 data.get('user_name', '')
             ]
             
-            # Log the record being saved
-            self.logger.info(f"Record data: {record}")
-            
-            # Use current data file
             current_file = self.get_current_data_file()
             
-            # Ensure the directory exists
-            os.makedirs(os.path.dirname(current_file), exist_ok=True)
+            with safe_csv_operation():
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(current_file), exist_ok=True)
+                
+                # Write to CSV
+                with open(current_file, 'a', newline='', encoding='utf-8') as csv_file:
+                    writer = csv.writer(csv_file)
+                    writer.writerow(record)
+                    csv_file.flush()  # Force write to disk
             
-            # Write to CSV
-            with open(current_file, 'a', newline='', encoding='utf-8') as csv_file:
-                writer = csv.writer(csv_file)
-                writer.writerow(record)
-            
-            self.logger.info(f" New record added to {current_file}")
+            self.logger.info(f"New record added to {current_file}")
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ Error adding new record: {e}")
+            self.logger.error(f"Error adding new record: {e}")
             return False
 
     def update_record(self, data):
@@ -1596,7 +1615,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 return False
                 
         except Exception as e:
-            self.logger.error(f"❌ Error updating record: {e}")
+            self.logger.error(f" Error updating record: {e}")
             return False
 
 

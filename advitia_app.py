@@ -476,7 +476,7 @@ class TharuniApp:
                 if entered_password == config.HARDCODED_PASSWORD:
                     return True
                 else:
-                    show_error("❌ Invalid password! Please try again.")
+                    show_error(" Invalid password! Please try again.")
                     return False
             
             def on_login():
@@ -501,7 +501,7 @@ class TharuniApp:
             
             # Cancel button
             cancel_btn = ttk.Button(button_frame, 
-                                text="❌ Cancel", 
+                                text=" Cancel", 
                                 command=on_cancel)
             cancel_btn.pack(side=tk.RIGHT)
             
@@ -988,7 +988,7 @@ class TharuniApp:
                         print(f"🎫 TICKET FLOW DEBUG:  Ticket counter incremented from {ticket_no}")
                         ticket_incremented = True
                     else:
-                        print(f"🎫 TICKET FLOW DEBUG: ❌ Failed to increment ticket counter")
+                        print(f"🎫 TICKET FLOW DEBUG:  Failed to increment ticket counter")
                         self.logger.warning(f"Failed to commit ticket number {ticket_no}")
                 else:
                     print(f"🎫 TICKET FLOW DEBUG: NOT incrementing counter - ticket {ticket_no} was already consumed")
@@ -1125,13 +1125,13 @@ class TharuniApp:
             else:
                 # Handle error case
                 error_msg = save_result.get('error', 'Unknown error') if isinstance(save_result, dict) else 'Save operation failed'
-                print(f"🎫 TICKET FLOW DEBUG: ❌ Save failed: {error_msg}")
-                self.logger.error(f"❌ Failed to save record {ticket_no}: {error_msg}")
+                print(f"🎫 TICKET FLOW DEBUG:  Save failed: {error_msg}")
+                self.logger.error(f" Failed to save record {ticket_no}: {error_msg}")
                 messagebox.showerror("Error", f"Failed to save record: {error_msg}")
                 
         except Exception as e:
-            print(f"🎫 TICKET FLOW DEBUG: ❌ Critical error in save_record: {e}")
-            self.logger.error(f"❌ Critical error in save_record: {e}")
+            print(f"🎫 TICKET FLOW DEBUG:  Critical error in save_record: {e}")
+            self.logger.error(f" Critical error in save_record: {e}")
             messagebox.showerror("Save Error", f"Critical error saving record:\n{str(e)}\n\nCheck logs for details.")
         finally:
             print("🎫 TICKET FLOW DEBUG: " + "="*50)

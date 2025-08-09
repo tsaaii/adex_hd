@@ -95,6 +95,8 @@ class SafeFileHandler(logging.FileHandler):
             # Catch any other file logging errors silently
             pass
 
+
+
 def safe_print(message):
     """Print message safely, handling None streams"""
     try:
@@ -301,6 +303,8 @@ class UnifiedLogger:
             # Create a fallback logger
             self.logger = self._create_fallback_logger()
     
+
+    
     def _create_fallback_logger(self):
         """Create a fallback logger that just prints"""
         class FallbackLogger:
@@ -428,46 +432,91 @@ class EnhancedLogger:
         except:
             safe_print(f"CRITICAL: {message}")
     
+    def safe_message(message):
+        """Convert Unicode characters to ASCII-safe equivalents"""
+        # Replace common Unicode emojis with ASCII equivalents
+        replacements = {
+            '🚛': '[TRUCK]',
+            '❌': '[ERROR]', 
+            '✅': '[SUCCESS]',
+            '⚠️': '[WARNING]',
+            'ℹ️': '[INFO]',
+            '🔍': '[DEBUG]',
+            '📋': '[LOG]',
+            '🎫': '[TICKET]',
+            '⏭️': '[SKIP]',
+            '🛡️': '[SAFE]',
+            '🔒': '[LOCK]',
+            '📁': '[FOLDER]',
+            '📄': '[FILE]',
+            '🖨️': '[PRINT]',
+            '📱': '[APP]',
+            '🚀': '[START]',
+            '🔄': '[REFRESH]',
+            '🌐': '[ONLINE]',
+            '📥': '[QUEUE]',
+            '🎛️': '[UI]',
+            '📹': '[CAMERA]',
+            '🎯': '[TARGET]',
+            '💾': '[SAVE]'
+        }
+        
+        # Replace Unicode characters
+        for unicode_char, ascii_replacement in replacements.items():
+            message = message.replace(unicode_char, ascii_replacement)
+        
+        return message
+
     # Print-style methods that also log
     def print_info(self, message):
-        """Print and log info message"""
+        """Print and log info message - UNICODE SAFE"""
         try:
-            safe_print(f"ℹ️ {message}")
-            self.logger.info(message)
-        except:
-            safe_print(f"ℹ️ {message}")
-    
-    def print_success(self, message):
-        """Print and log success message"""
-        try:
-            safe_print(f" {message}")
-            self.logger.info(f"SUCCESS: {message}")
-        except:
-            safe_print(f" {message}")
-    
-    def print_warning(self, message):
-        """Print and log warning message"""
-        try:
-            safe_print(f"⚠️ {message}")
-            self.logger.warning(message)
-        except:
-            safe_print(f"⚠️ {message}")
-    
+            safe_msg = safe_message(message)
+            print(f"[INFO] {safe_msg}")
+            if hasattr(self, 'logger'):
+                self.logger.info(safe_msg)
+        except Exception as e:
+            print(f"[INFO] {message}")  # Fallback without emojis
+
     def print_error(self, message):
-        """Print and log error message"""
+        """Print and log error message - UNICODE SAFE"""
         try:
-            safe_print(f"❌ {message}")
-            self.logger.error(message)
-        except:
-            safe_print(f"❌ {message}")
-    
+            safe_msg = safe_message(message)
+            print(f"[ERROR] {safe_msg}")
+            if hasattr(self, 'logger'):
+                self.logger.error(safe_msg)
+        except Exception as e:
+            print(f"[ERROR] {message}")  # Fallback without emojis
+
+    def print_success(self, message):
+        """Print and log success message - UNICODE SAFE"""
+        try:
+            safe_msg = safe_message(message)
+            print(f"[SUCCESS] {safe_msg}")
+            if hasattr(self, 'logger'):
+                self.logger.info(f"SUCCESS: {safe_msg}")
+        except Exception as e:
+            print(f"[SUCCESS] {message}")  # Fallback without emojis
+
+    def print_warning(self, message):
+        """Print and log warning message - UNICODE SAFE"""
+        try:
+            safe_msg = safe_message(message)
+            print(f"[WARNING] {safe_msg}")
+            if hasattr(self, 'logger'):
+                self.logger.warning(safe_msg)
+        except Exception as e:
+            print(f"[WARNING] {message}")  # Fallback without emojis
+
     def print_debug(self, message):
-        """Print and log debug message"""
+        """Print and log debug message - UNICODE SAFE"""
         try:
-            safe_print(f"🔍 {message}")
-            self.logger.debug(message)
-        except:
-            safe_print(f"🔍 {message}")
+            safe_msg = safe_message(message)
+            print(f"[DEBUG] {safe_msg}")
+            if hasattr(self, 'logger'):
+                self.logger.debug(safe_msg)
+        except Exception as e:
+            print(f"[DEBUG] {message}") 
 
 # Easy-to-use functions for your existing code
 def setup_unified_logging(app_name="advitia_app", log_folder=None):

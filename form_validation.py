@@ -1,5 +1,3 @@
-# Fixed form_validation.py - Proper pending vehicle validation logic
-
 from tkinter import messagebox
 import logging
 
