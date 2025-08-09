@@ -7,6 +7,121 @@ import logging
 import config
 from ui_components import HoverButton
 
+import logging
+import threading
+import time
+import contextlib
+import os
+import csv
+
+# Global lock for file operations
+_pending_file_lock = threading.RLock()
+
+class SafeLogger:
+    """Thread-safe logger that handles closed file scenarios gracefully"""
+    
+    def __init__(self, name, fallback_to_print=True):
+        self.name = name
+        self.fallback_to_print = fallback_to_print
+        self._lock = threading.Lock()
+        self._logger = None
+        self._setup_logger()
+    
+    def _setup_logger(self):
+        """Setup logger with safe file handling"""
+        try:
+            self._logger = logging.getLogger(self.name)
+            # Don't add multiple handlers
+            if not self._logger.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                handler.setFormatter(formatter)
+                self._logger.addHandler(handler)
+                self._logger.setLevel(logging.INFO)
+        except Exception as e:
+            print(f"Logger setup failed for {self.name}: {e}")
+            self._logger = None
+    
+    def _safe_log(self, level, message):
+        """Thread-safe logging with fallback"""
+        with self._lock:
+            try:
+                if self._logger:
+                    getattr(self._logger, level)(message)
+                    return True
+            except (ValueError, OSError, AttributeError) as e:
+                if "closed file" in str(e).lower():
+                    if self.fallback_to_print:
+                        print(f"[{self.name}-{level.upper()}] {message}")
+                    return False
+                else:
+                    raise
+            except Exception as e:
+                if self.fallback_to_print:
+                    print(f"[{self.name}-{level.upper()}] {message} (LOG_ERROR: {e})")
+                return False
+        return False
+    
+    def info(self, message):
+        self._safe_log('info', message)
+    
+    def warning(self, message):
+        self._safe_log('warning', message)
+    
+    def error(self, message):
+        self._safe_log('error', message)
+    
+    def debug(self, message):
+        self._safe_log('debug', message)
+
+@contextlib.contextmanager
+def safe_file_operation(retries=3, delay=0.1):
+    """Context manager for safe file operations with retries"""
+    for attempt in range(retries):
+        try:
+            with _pending_file_lock:
+                yield
+            break
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() or "I/O operation" in str(e).lower():
+                if attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"File operation failed after {retries} attempts: {e}")
+                    raise
+            else:
+                raise
+        except Exception as e:
+            print(f"Unexpected error in file operation: {e}")
+            raise
+
+def safe_csv_read(file_path, retries=3):
+    """Safely read CSV file with retries and proper error handling"""
+    if not os.path.exists(file_path):
+        return []
+    
+    for attempt in range(retries):
+        try:
+            with safe_file_operation():
+                with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
+                    reader = csv.DictReader(csv_file)
+                    records = list(reader)
+                return records
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() and attempt < retries - 1:
+                print(f"CSV read attempt {attempt + 1} failed, retrying: {e}")
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            else:
+                print(f"CSV read failed after {retries} attempts: {e}")
+                return []
+        except Exception as e:
+            print(f"Unexpected CSV read error: {e}")
+            return []
+    
+    return []
+
 class PendingVehiclesPanel:
     """FIXED: Panel to display and manage vehicles waiting for second weighment with enhanced logging"""
     
@@ -176,123 +291,87 @@ class PendingVehiclesPanel:
             self.on_vehicle_select(ticket_no)
             
     def refresh_pending_list(self):
-        """Enhanced refresh with shutdown protection and safe error handling"""
+        """FIXED: Refresh pending vehicles list with comprehensive error handling"""
+        # Use safe logger
+        if not hasattr(self, 'safe_logger'):
+            self.safe_logger = SafeLogger('PendingVehicles')
+        
         try:
-            print(f"🚛 PENDING DEBUG: Refreshing pending vehicles list...")
-            self.logger.info("Refreshing pending vehicles list")
+            self.safe_logger.info("Refreshing pending vehicles list")
             
-            # Check if the tree widget still exists
+            # Check if widget still exists
             if not hasattr(self, 'tree') or not self.tree.winfo_exists():
-                print(f"🚛 PENDING DEBUG: ❌ Tree widget no longer exists - skipping refresh")
-                self.logger.warning("Tree widget no longer exists - skipping refresh")
-                return
-                
-            # Check if data manager is available and not shutting down
-            if not self.data_manager:
-                print(f"🚛 PENDING DEBUG: ❌ No data manager available")
-                self.logger.warning("No data manager available")
+                self.safe_logger.warning("Tree widget no longer exists - skipping refresh")
                 return
             
-            # Check if data manager is shutting down
-            if hasattr(self.data_manager, 'is_shutting_down') and self.data_manager.is_shutting_down:
-                print(f"🚛 PENDING DEBUG: ⏸️ Data manager is shutting down - skipping refresh")
-                self.logger.info("Data manager is shutting down - skipping refresh")
+            # Check data manager availability
+            if not self.data_manager:
+                self.safe_logger.warning("No data manager available")
                 return
-                
+            
+            # Check shutdown status
+            if hasattr(self.data_manager, 'is_shutting_down') and self.data_manager.is_shutting_down:
+                self.safe_logger.info("Data manager is shutting down - skipping refresh")
+                return
+            
             # Clear existing items
             for item in self.tree.get_children():
                 self.tree.delete(item)
-                
-            # Get all records with error handling
-            try:
-                records = self.data_manager.get_all_records()
-                print(f"🚛 PENDING DEBUG: Retrieved {len(records)} total records")
-                self.logger.info(f"Retrieved {len(records)} total records")
-            except Exception as data_error:
-                error_str = str(data_error).lower()
-                if "closed file" in error_str or "i/o operation" in error_str:
-                    print(f"🚛 PENDING DEBUG: 🔄 File I/O error getting records - will retry later: {data_error}")
-                    self.logger.warning(f"File I/O error getting records: {data_error}")
-                    # Schedule retry for later instead of failing
-                    self.schedule_next_refresh()
-                    return
-                else:
-                    print(f"🚛 PENDING DEBUG: ❌ Error getting records: {data_error}")
-                    self.logger.error(f"Error getting records: {data_error}")
-                    return
             
-            # Filter for pending vehicles - only one record per vehicle
+            # Get records with safe operations
+            records = safe_csv_read(self.data_manager.get_current_data_file())
+            self.safe_logger.info(f"Retrieved {len(records)} total records")
+            
+            # Filter for pending vehicles
             pending_records = []
-            seen_vehicle_numbers = set()  # Track vehicle numbers already added
-            duplicate_count = 0
+            seen_vehicles = set()
             
             for record in records:
-                ticket_no = record.get('ticket_no', 'Unknown')
-                vehicle_no = record.get('vehicle_no', '').strip().upper()  # Normalize
+                # Normalize field names
+                ticket_no = record.get('Ticket No', record.get('ticket_no', 'Unknown'))
+                vehicle_no = record.get('Vehicle No', record.get('vehicle_no', '')).strip().upper()
                 
-                # Check if record has first weighment but missing second
-                first_weight = record.get('first_weight', '').strip()
-                first_timestamp = record.get('first_timestamp', '').strip()
-                has_first = first_weight != '' and first_timestamp != ''
+                # Check if has first but missing second weighment
+                first_weight = record.get('First Weight', record.get('first_weight', '')).strip()
+                first_timestamp = record.get('First Timestamp', record.get('first_timestamp', '')).strip()
+                second_weight = record.get('Second Weight', record.get('second_weight', '')).strip()
+                second_timestamp = record.get('Second Timestamp', record.get('second_timestamp', '')).strip()
                 
-                second_weight = record.get('second_weight', '').strip()
-                second_timestamp = record.get('second_timestamp', '').strip()
-                missing_second = (second_weight == '' or second_timestamp == '')
+                has_first = bool(first_weight and first_timestamp)
+                missing_second = not bool(second_weight and second_timestamp)
                 
-                # Debug print for each record
-                print(f"🚛 PENDING DEBUG: Checking ticket {ticket_no}:")
-                print(f"   - vehicle_no: '{vehicle_no}'")
-                print(f"   - has_first: {has_first}, missing_second: {missing_second}")
-                
-                if has_first and missing_second:
-                    if vehicle_no in seen_vehicle_numbers:
-                        duplicate_count += 1
-                        print(f"🚛 PENDING DEBUG: ⚠️  DUPLICATE VEHICLE: {vehicle_no} already in pending - skipping {ticket_no}")
-                        self.logger.warning(f"Duplicate vehicle {vehicle_no} - skipping ticket {ticket_no}")
-                        continue
-                    
-                    # Add to pending and mark vehicle as seen
+                if has_first and missing_second and vehicle_no not in seen_vehicles:
                     pending_records.append(record)
-                    seen_vehicle_numbers.add(vehicle_no)
-                    print(f"🚛 PENDING DEBUG: ✅ Added to pending: {ticket_no} (vehicle: {vehicle_no})")
-                    self.logger.info(f"Added to pending: {ticket_no} (vehicle: {vehicle_no})")
-                else:
-                    print(f"🚛 PENDING DEBUG: ⏭️  Skipped ticket {ticket_no} - not pending")
+                    seen_vehicles.add(vehicle_no)
+                    self.safe_logger.info(f"Added to pending: {ticket_no} (vehicle: {vehicle_no})")
             
-            print(f"🚛 PENDING DEBUG: 📈 Found {len(pending_records)} unique pending vehicles")
-            print(f"🚛 PENDING DEBUG: 🚫 Prevented {duplicate_count} duplicate vehicles from showing")
-            self.logger.info(f"Found {len(pending_records)} unique pending vehicles, prevented {duplicate_count} duplicates")
-            
-            # Add to treeview, most recent first
-            for record in reversed(pending_records):
-                ticket_no = record.get('ticket_no', '')
-                vehicle_no = record.get('vehicle_no', '')
-                timestamp = record.get('first_timestamp', '')
+            # Add to treeview
+            for record in reversed(pending_records):  # Most recent first
+                ticket_no = record.get('Ticket No', record.get('ticket_no', ''))
+                vehicle_no = record.get('Vehicle No', record.get('vehicle_no', ''))
+                timestamp = record.get('First Timestamp', record.get('first_timestamp', ''))
                 
                 self.tree.insert("", tk.END, values=(
                     ticket_no,
                     vehicle_no,
                     self.format_timestamp(timestamp)
                 ))
-                print(f"🚛 PENDING DEBUG: 📝 Added to treeview: {ticket_no} - {vehicle_no}")
             
-            # Apply alternating row colors
+            # Apply row colors
             self._apply_row_colors()
             
-            print(f"🚛 PENDING DEBUG: ✅ Successfully refreshed pending list with {len(pending_records)} unique vehicles")
-            self.logger.info(f"Successfully refreshed pending list with {len(pending_records)} unique vehicles")
+            self.safe_logger.info(f"Successfully refreshed pending list with {len(pending_records)} unique vehicles")
             
         except Exception as e:
-            # Enhanced error handling for different error types
             error_str = str(e).lower()
             if "closed file" in error_str or "i/o operation" in error_str:
-                print(f"🚛 PENDING DEBUG: 🔄 File I/O error during refresh - will retry later: {e}")
-                self.logger.error(f"File I/O error during refresh: {e}")
-                # Don't crash, just schedule retry
-                self.schedule_next_refresh()
+                self.safe_logger.error(f"File I/O error during refresh: {e}")
+                # Schedule retry instead of crashing
+                if hasattr(self, 'parent') and self.parent:
+                    self.parent.after(30000, self.refresh_pending_list)  # Retry in 30 seconds
             else:
-                print(f"🚛 PENDING DEBUG: ❌ Error refreshing pending vehicles list: {e}")
-                self.logger.error(f"Error refreshing pending vehicles list: {e}")
+                self.safe_logger.error(f"Error refreshing pending vehicles list: {e}")
+
 
     def schedule_next_refresh(self):
         """Schedule the next automatic refresh with error handling"""

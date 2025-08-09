@@ -51,7 +51,7 @@ from settings_storage import SettingsStorage
 from login_dialog import LoginDialog
 import pandas._libs.testing
 from unified_logging import setup_unified_logging
-from data_management import safe_csv_operation
+from data_management import safe_file_operation
 try:
     from simple_connectivity import add_connectivity_to_app, add_to_queue_if_available, cleanup_connectivity
     CONNECTIVITY_AVAILABLE = True

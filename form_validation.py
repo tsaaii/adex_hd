@@ -1,6 +1,7 @@
 from tkinter import messagebox
 import logging
-from data_management import safe_csv_operation
+from data_management import safe_file_operation
+
 class FormValidator:
     """FIXED: Handles form validation logic with correct pending vehicle validation and robust logging"""
     
@@ -337,8 +338,8 @@ class FormValidator:
         try:
             self.logger.info("Starting comprehensive form validation")
             
-            # Wrap entire validation in safe_csv_operation to prevent file conflicts
-            with safe_csv_operation():
+            # Wrap entire validation in safe_file_operation to prevent file conflicts
+            with safe_file_operation():
                 
                 # Pause background operations during validation
                 main_app = self.find_main_app()

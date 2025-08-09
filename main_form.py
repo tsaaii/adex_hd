@@ -11,13 +11,15 @@ import threading
 import config
 from ui_components import HoverButton
 from camera import CameraView, add_watermark
-from data_management import safe_csv_operation
+from data_management import safe_file_operation
 
 # Import modular components
 from form_validation import FormValidator
 from weight_manager import WeightManager
 from vehicle_autocomplete import VehicleAutocomplete
 from image_handler import ImageHandler
+
+
 
 class MainForm:
     """Main data entry form for vehicle information"""
@@ -44,7 +46,7 @@ class MainForm:
         self.view_callback = view_callback
         self.clear_callback = clear_callback
         self.exit_callback = exit_callback
-        
+        self.form_validator = FormValidator(self)
         # Initialize form variables
         self.init_variables()
         
@@ -1984,22 +1986,19 @@ class MainForm:
         
         return bool(first_weight and first_timestamp and second_weight and second_timestamp)
 
-    def validate_form(self):
-        """FIXED: Delegate form validation to FormValidator instance"""
-        try:
-            self.logger.info("Starting form validation - delegating to FormValidator")
+
             
-            # Use the form_validator instance to validate
+# In your MainForm class:
+    def validate_form(self):
+        """Delegate form validation to FormValidator instance"""
+        try:
             if hasattr(self, 'form_validator') and self.form_validator:
                 return self.form_validator.validate_form()
             else:
-                self.logger.error("No form_validator available")
-                messagebox.showerror("System Error", "Form validator not available. Please restart the application.")
+                print("No form_validator available")
                 return False
-            
         except Exception as e:
-            self.logger.error(f"Error in form validation delegation: {e}")
-            messagebox.showerror("Validation Error", f"Form validation failed: {str(e)}")
+            print(f"Error in form validation: {e}")
             return False
 
     def set_agency(self, agency_name):

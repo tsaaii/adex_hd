@@ -325,7 +325,7 @@ class SettingsPanel:
                 if hasattr(self, 'weighbridge') and self.weighbridge:
                     self.weighbridge.update_regex_pattern(regex_pattern)
                     print(f"Applied regex pattern to weighbridge: {regex_pattern}")
-                messagebox.showinfo("Success", "Weighbridge settings saved successfully!\nRegex pattern applied.")
+                # messagebox.showinfo("Success", "Weighbridge settings saved successfully!\nRegex pattern applied.")
                 return True
             else:
                 messagebox.showerror("Error", "Failed to save weighbridge settings")

@@ -1,5 +1,3 @@
-# Fixed data_management.py - Resolves today_json_folder attribute error
-
 import os
 import csv
 import pandas as pd
@@ -13,68 +11,269 @@ from cloud_storage import CloudStorageService
 import config
 import threading
 import time
-from contextlib import contextmanager
-import threading
-import time
-from contextlib import contextmanager
+from threading import Lock
+from io import BytesIO
+from PIL import Image as PILImage
+import contextlib
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
-# Add this global lock after the imports
-_image_processing_lock = threading.RLock()  # Prevents concurrent image processing
-_pdf_generation_lock = threading.RLock()   # Prevents concurrent PDF generation
-@contextmanager
-def safe_image_operation(max_retries=3, retry_delay=0.1):
-    """Context manager for safe image file operations with retries"""
-    for attempt in range(max_retries):
+import cv2
+# ADD THESE SAFE OPERATION FUNCTIONS after imports:
+
+# Global lock for all file operations
+_global_file_lock = threading.RLock()
+_pdf_generation_lock = threading.RLock()
+class SafeLogger:
+    """Thread-safe logger that handles closed file scenarios gracefully"""
+    
+    def __init__(self, name, fallback_to_print=True):
+        self.name = name
+        self.fallback_to_print = fallback_to_print
+        self._lock = threading.Lock()
+        self._logger = None
+        self._setup_logger()
+    
+    def _setup_logger(self):
+        """Setup logger with safe file handling"""
         try:
-            with _image_processing_lock:
-                yield
-                break  # Success, exit the retry loop
+            self._logger = logging.getLogger(self.name)
+            # Don't add multiple handlers
+            if not self._logger.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                handler.setFormatter(formatter)
+                self._logger.addHandler(handler)
+                self._logger.setLevel(logging.INFO)
         except Exception as e:
-            if "closed file" in str(e).lower() and attempt < max_retries - 1:
-                # Wait a bit and retry for closed file errors
-                time.sleep(retry_delay)
+            print(f"Logger setup failed for {self.name}: {e}")
+            self._logger = None
+    
+    def _safe_log(self, level, message):
+        """Thread-safe logging with fallback"""
+        with self._lock:
+            try:
+                if self._logger:
+                    getattr(self._logger, level)(message)
+                    return True
+            except (ValueError, OSError, AttributeError) as e:
+                if "closed file" in str(e).lower():
+                    if self.fallback_to_print:
+                        print(f"[{self.name}-{level.upper()}] {message}")
+                    return False
+                else:
+                    raise
+            except Exception as e:
+                if self.fallback_to_print:
+                    print(f"[{self.name}-{level.upper()}] {message} (LOG_ERROR: {e})")
+                return False
+        return False
+    
+    def info(self, message):
+        self._safe_log('info', message)
+    
+    def warning(self, message):
+        self._safe_log('warning', message)
+    
+    def error(self, message):
+        self._safe_log('error', message)
+    
+    def debug(self, message):
+        self._safe_log('debug', message)
+
+@contextlib.contextmanager
+def safe_file_operation(retries=3, delay=0.1):
+    """Context manager for safe file operations with retries"""
+    for attempt in range(retries):
+        try:
+            with _global_file_lock:
+                yield
+            break
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() or "I/O operation" in str(e).lower():
+                if attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"File operation failed after {retries} attempts: {e}")
+                    raise
+            else:
+                raise
+        except Exception as e:
+            print(f"Unexpected error in file operation: {e}")
+            raise
+
+def safe_csv_read(file_path, retries=3):
+    """Safely read CSV file with retries and proper error handling"""
+    if not os.path.exists(file_path):
+        return []
+    
+    for attempt in range(retries):
+        try:
+            with safe_file_operation():
+                with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
+                    reader = csv.DictReader(csv_file)
+                    records = list(reader)
+                return records
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() and attempt < retries - 1:
+                print(f"CSV read attempt {attempt + 1} failed, retrying: {e}")
+                time.sleep(0.2 * (attempt + 1))
                 continue
             else:
-                # Re-raise the exception if it's not a closed file error or max retries reached
-                raise
-    else:
-        raise RuntimeError("Max retries exceeded for image operation")
-# Global file lock for CSV operations
-_csv_file_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
-
-@contextmanager
-def safe_csv_operation(max_retries=3, retry_delay=0.1):
-    """Context manager for safe CSV file operations with retries"""
-    for attempt in range(max_retries):
-        try:
-            with _csv_file_lock:
-                yield
-                break  # Success, exit the retry loop
+                print(f"CSV read failed after {retries} attempts: {e}")
+                return []
         except Exception as e:
-            if "closed file" in str(e).lower() and attempt < max_retries - 1:
-                # Wait a bit and retry for closed file errors
-                time.sleep(retry_delay)
+            print(f"Unexpected CSV read error: {e}")
+            return []
+    
+    return []
+
+def safe_csv_write(file_path, records, headers, retries=3):
+    """Safely write CSV file with retries and proper error handling"""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    for attempt in range(retries):
+        try:
+            with safe_file_operation():
+                # Create backup before writing
+                backup_path = f"{file_path}.backup_{int(time.time())}"
+                if os.path.exists(file_path):
+                    shutil.copy2(file_path, backup_path)
+                
+                try:
+                    with open(file_path, 'w', newline='', encoding='utf-8') as csv_file:
+                        writer = csv.DictWriter(csv_file, fieldnames=headers)
+                        writer.writeheader()
+                        writer.writerows(records)
+                    
+                    # Remove backup on success
+                    if os.path.exists(backup_path):
+                        os.remove(backup_path)
+                    
+                    return True
+                    
+                except Exception as write_error:
+                    # Restore from backup on failure
+                    if os.path.exists(backup_path):
+                        shutil.copy2(backup_path, file_path)
+                        os.remove(backup_path)
+                    raise write_error
+                    
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() and attempt < retries - 1:
+                print(f"CSV write attempt {attempt + 1} failed, retrying: {e}")
+                time.sleep(0.2 * (attempt + 1))
                 continue
             else:
-                # Re-raise the exception if it's not a closed file error or max retries reached
+                print(f"CSV write failed after {retries} attempts: {e}")
+                return False
+        except Exception as e:
+            print(f"Unexpected CSV write error: {e}")
+            return False
+    
+    return False
+
+@contextlib.contextmanager
+
+def safe_file_operation(retries=3, delay=0.1):
+    """Context manager for safe file operations with retries"""
+    for attempt in range(retries):
+        try:
+            with _global_file_lock:
+                yield
+            break
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() or "I/O operation" in str(e).lower():
+                if attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"File operation failed after {retries} attempts: {e}")
+                    raise
+            else:
                 raise
-    else:
-        # This should not happen, but just in case
-        raise RuntimeError("Max retries exceeded for CSV operation")
-# Import PDF generation capabilities
-try:
-    from reportlab.lib.pagesizes import letter, A4
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    import cv2
-    REPORTLAB_AVAILABLE = True
-except ImportError:
-    REPORTLAB_AVAILABLE = False
-    print("ReportLab not available - PDF auto-generation will be disabled")
+        except Exception as e:
+            print(f"Unexpected error in file operation: {e}")
+            raise
+
+def safe_csv_read(file_path, retries=3):
+    """Safely read CSV file with retries and proper error handling"""
+    if not os.path.exists(file_path):
+        return []
+    
+    for attempt in range(retries):
+        try:
+            with safe_file_operation():
+                with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
+                    reader = csv.DictReader(csv_file)
+                    records = list(reader)
+                return records
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() and attempt < retries - 1:
+                print(f"CSV read attempt {attempt + 1} failed, retrying: {e}")
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            else:
+                print(f"CSV read failed after {retries} attempts: {e}")
+                return []
+        except Exception as e:
+            print(f"Unexpected CSV read error: {e}")
+            return []
+    
+    return []
+
+def safe_csv_write(file_path, records, headers, retries=3):
+    """Safely write CSV file with retries and proper error handling"""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    for attempt in range(retries):
+        try:
+            with safe_file_operation():
+                # Create backup before writing
+                backup_path = f"{file_path}.backup_{int(time.time())}"
+                if os.path.exists(file_path):
+                    shutil.copy2(file_path, backup_path)
+                
+                try:
+                    with open(file_path, 'w', newline='', encoding='utf-8') as csv_file:
+                        writer = csv.DictWriter(csv_file, fieldnames=headers)
+                        writer.writeheader()
+                        writer.writerows(records)
+                    
+                    # Remove backup on success
+                    if os.path.exists(backup_path):
+                        os.remove(backup_path)
+                    
+                    return True
+                    
+                except Exception as write_error:
+                    # Restore from backup on failure
+                    if os.path.exists(backup_path):
+                        shutil.copy2(backup_path, file_path)
+                        os.remove(backup_path)
+                    raise write_error
+                    
+        except (OSError, ValueError) as e:
+            if "closed file" in str(e).lower() and attempt < retries - 1:
+                print(f"CSV write attempt {attempt + 1} failed, retrying: {e}")
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            else:
+                print(f"CSV write failed after {retries} attempts: {e}")
+                return False
+        except Exception as e:
+            print(f"Unexpected CSV write error: {e}")
+            return False
+    
+    return False
 
 
 
@@ -102,7 +301,8 @@ class DataManager:
         self.pdf_reports_folder = config.REPORTS_FOLDER
         self.json_backup_folder = config.JSON_BACKUPS_FOLDER
         self.today_reports_folder = config.DATA_FOLDER
-        
+        self.safe_logger = SafeLogger('DataManager')
+        self.is_shutting_down = False
         # CRITICAL FIX: Initialize these attributes with safe defaults FIRST
         self.today_json_folder = None
         self.today_pdf_folder = None
@@ -141,188 +341,153 @@ class DataManager:
         self.logger.info(f"Today's PDF folder: {self.today_pdf_folder}")
         self.logger.info("Cloud storage will only be initialized when backup is requested")
 
+    def get_all_records(self):
+        """FIXED: Get all records with safe file operations and no I/O errors"""
+        # Check shutdown status
+        if getattr(self, 'is_shutting_down', False):
+            print("🛑 DATA MANAGER: get_all_records blocked - shutdown in progress")
+            return []
+        
+        current_file = self.get_current_data_file()
+        
+        # Use safe CSV read
+        raw_records = safe_csv_read(current_file)
+        
+        if not raw_records:
+            self.safe_logger.warning(f"No records found in {current_file}")
+            return []
+        
+        # Normalize record keys (handle both old and new CSV formats)
+        records = []
+        for record in raw_records:
+            normalized_record = {
+                'date': record.get('Date', record.get('date', '')),
+                'time': record.get('Time', record.get('time', '')),
+                'site_name': record.get('Site Name', record.get('site_name', '')),
+                'agency_name': record.get('Agency Name', record.get('agency_name', '')),
+                'material': record.get('Material', record.get('material', '')),
+                'ticket_no': record.get('Ticket No', record.get('ticket_no', '')),
+                'vehicle_no': record.get('Vehicle No', record.get('vehicle_no', '')),
+                'transfer_party_name': record.get('Transfer Party Name', record.get('transfer_party_name', '')),
+                'first_weight': record.get('First Weight', record.get('first_weight', '')),
+                'first_timestamp': record.get('First Timestamp', record.get('first_timestamp', '')),
+                'second_weight': record.get('Second Weight', record.get('second_weight', '')),
+                'second_timestamp': record.get('Second Timestamp', record.get('second_timestamp', '')),
+                'net_weight': record.get('Net Weight', record.get('net_weight', '')),
+                'material_type': record.get('Material Type', record.get('material_type', '')),
+                'first_front_image': record.get('First Front Image', record.get('first_front_image', '')),
+                'first_back_image': record.get('First Back Image', record.get('first_back_image', '')),
+                'second_front_image': record.get('Second Front Image', record.get('second_front_image', '')),
+                'second_back_image': record.get('Second Back Image', record.get('second_back_image', '')),
+                'site_incharge': record.get('Site Incharge', record.get('site_incharge', '')),
+                'user_name': record.get('User Name', record.get('user_name', ''))
+            }
+            records.append(normalized_record)
+        
+        self.safe_logger.info(f"Successfully loaded {len(records)} records")
+        return records
+
     def save_record(self, data):
-        """RESTORED: Save record using your proven working logic + I/O error protection"""
+        """FIXED: Save record with comprehensive I/O error protection"""
+        # Check shutdown status
+        if getattr(self, 'is_shutting_down', False):
+            print("🛑 DATA MANAGER: save_record blocked - shutdown in progress")
+            return {'success': False, 'error': 'Application shutting down'}
+        
         try:
-            # ADD: Shutdown protection (new safety feature)
-            if getattr(self, 'is_shutting_down', False):
-                print("🛑 DATA MANAGER: Save blocked - shutdown in progress")
-                return {'success': False, 'error': 'Application shutting down'}
+            self.safe_logger.info("STARTING OFFLINE-FIRST RECORD SAVE")
             
-            # SAFE LOGGING: Use safe logging wrapper to prevent I/O errors
-            def safe_log(level, message):
-                """Safe logging that handles closed files"""
-                try:
-                    if not getattr(self, 'is_shutting_down', False):
-                        getattr(self.logger, level)(message)
-                    else:
-                        print(f"[{level.upper()}] {message}")
-                except (ValueError, OSError, AttributeError) as e:
-                    if "closed file" in str(e).lower():
-                        print(f"[{level.upper()}] {message}")
-                    else:
-                        print(f"[LOG-ERROR] {e}")
-                except Exception:
-                    print(f"[{level.upper()}] {message}")
-            
-            safe_log("info", "="*50)
-            safe_log("info", "STARTING OFFLINE-FIRST RECORD SAVE")
-            safe_log("info", f"Input data keys: {list(data.keys())}")
-            
-            # RESTORED: Use your original validation method name
-            validation_result = self.validate_record_data(data)
-            if not validation_result['valid']:
-                safe_log("error", f"Validation failed: {validation_result['errors']}")
-                if messagebox and not getattr(self, 'is_shutting_down', False):
-                    messagebox.showerror("Validation Error", f"Record validation failed:\n" + "\n".join(validation_result['errors']))
-                return {'success': False, 'error': 'Validation failed'}
-            
-            # FIXED: Calculate and set net weight properly (your original logic)
+            # Calculate net weight
             data = self.calculate_and_set_net_weight(data)
             
-            # Use the current data file
-            current_file = self.get_current_data_file()
-            safe_log("info", f"Using data file: {current_file}")
+            # Validate data
+            validation_result = self.validate_record_data(data)
+            if not validation_result['valid']:
+                self.safe_logger.error(f"Validation failed: {validation_result['errors']}")
+                return {'success': False, 'error': 'Validation failed'}
             
-            # Check if this is an update to an existing record
+            # Get current file and records
+            current_file = self.get_current_data_file()
+            all_records = safe_csv_read(current_file)
+            
+            # Check if this is an update
             ticket_no = data.get('ticket_no', '')
             is_update = False
             
-            if ticket_no:
-                # Check if record with this ticket number exists
-                records = self.get_filtered_records(ticket_no)
-                for record in records:
-                    if record.get('ticket_no') == ticket_no:
-                        is_update = True
-                        safe_log("info", f"Updating existing record: {ticket_no}")
-                        break
+            for i, record in enumerate(all_records):
+                if record.get('Ticket No', record.get('ticket_no', '')) == ticket_no:
+                    # Update existing record
+                    all_records[i] = self._prepare_record_for_csv(data)
+                    is_update = True
+                    self.safe_logger.info(f"Updating existing record: {ticket_no}")
+                    break
             
             if not is_update:
-                safe_log("info", f"Adding new record: {ticket_no}")
+                # Add new record
+                all_records.append(self._prepare_record_for_csv(data))
+                self.safe_logger.info(f"Adding new record: {ticket_no}")
             
-            # PRIORITY 1: Save to CSV locally (this MUST work) - RESTORED your working logic
-            csv_success = False
-            try:
-                # Check shutdown again before CSV operations
-                if getattr(self, 'is_shutting_down', False):
-                    print("🛑 DATA MANAGER: Save blocked before CSV write - shutdown in progress")
-                    return {'success': False, 'error': 'Application shutting down before CSV write'}
+            # Write back to CSV safely
+            headers = [
+                'Date', 'Time', 'Site Name', 'Agency Name', 'Material', 'Ticket No', 
+                'Vehicle No', 'Transfer Party Name', 'First Weight', 'First Timestamp',
+                'Second Weight', 'Second Timestamp', 'Net Weight', 'Material Type',
+                'First Front Image', 'First Back Image', 'Second Front Image', 
+                'Second Back Image', 'Site Incharge', 'User Name'
+            ]
+            
+            success = safe_csv_write(current_file, all_records, headers)
+            
+            if success:
+                self.safe_logger.info(f" Record {ticket_no} saved successfully")
                 
-                if is_update:
-                    csv_success = self.update_record(data)
-                else:
-                    csv_success = self.add_new_record(data)
+                # Additional processing for complete records
+                is_complete = self.is_record_complete(data)
+                if is_complete:
+                    try:
+                        self.save_json_backup_locally(data)
+                        self.auto_generate_pdf_for_complete_record(data)
+                    except Exception as e:
+                        self.safe_logger.warning(f"Non-critical error in post-save processing: {e}")
                 
-                if csv_success:
-                    safe_log("info", f"✅ Record {ticket_no} saved to local CSV successfully")
-                else:
-                    safe_log("error", f"❌ Failed to save record {ticket_no} to local CSV")
-                    return {'success': False, 'error': 'Failed to save to CSV'}
-            except Exception as csv_error:
-                safe_log("error", f"❌ Critical error saving to CSV: {csv_error}")
-                return {'success': False, 'error': f'CSV error: {str(csv_error)}'}
-            
-            # Check if this is a complete record (both weighments) - RESTORED
-            is_complete_record = self.is_record_complete(data)
-            
-            # Analyze weighment state for logging - RESTORED your original logic
-            first_weight = data.get('first_weight', '').strip()
-            first_timestamp = data.get('first_timestamp', '').strip()
-            second_weight = data.get('second_weight', '').strip()
-            second_timestamp = data.get('second_timestamp', '').strip()
-            
-            has_first_weighment = bool(first_weight and first_timestamp)
-            has_second_weighment = bool(second_weight and second_timestamp)
-            is_first_weighment_save = has_first_weighment and not has_second_weighment
-            
-            safe_log("info", f"Weighment analysis:")
-            safe_log("info", f"  - Has first weighment: {has_first_weighment}")
-            safe_log("info", f"  - Has second weighment: {has_second_weighment}")
-            safe_log("info", f"  - Is first weighment save: {is_first_weighment_save}")
-            safe_log("info", f"  - Is complete record: {is_complete_record}")
-            safe_log("info", f"  - Is update: {is_update}")
-            
-            # PRIORITY 2: Save complete records as JSON locally - RESTORED
-            json_saved = False
-            if is_complete_record:
-                safe_log("info", f"Complete record detected - saving JSON backup locally...")
-                try:
-                    json_saved = self.save_json_backup_locally(data)
-                    if json_saved:
-                        safe_log("info", f"✅ JSON backup saved locally for {ticket_no}")
-                    else:
-                        safe_log("warning", f"⚠️ Failed to save JSON backup for {ticket_no}")
-                except Exception as json_error:
-                    safe_log("error", f"⚠️ JSON backup error (non-critical): {json_error}")
-            
-            # PRIORITY 3: Auto-generate PDF for complete records - RESTORED
-            pdf_generated = False
-            pdf_path = None
-            todays_reports_folder = None
-            
-            if is_complete_record:
-                safe_log("info", f"Complete record detected for ticket {ticket_no} - generating PDF locally...")
-                try:
-                    # Get today's reports folder path
-                    todays_reports_folder = self.get_todays_reports_folder()
-                    safe_log("info", f"Reports will be saved to: {todays_reports_folder}")
-                    
-                    pdf_generated, pdf_path = self.auto_generate_pdf_for_complete_record(data)
-                    if pdf_generated:
-                        safe_log("info", f"✅ PDF auto-generated locally: {pdf_path}")
-                    else:
-                        safe_log("warning", "⚠️ PDF generation failed, but record and JSON were saved locally")
-                except Exception as pdf_error:
-                    safe_log("error", f"⚠️ PDF generation error (non-critical): {pdf_error}")
-            
-            # IMPORTANT: NO CLOUD STORAGE ATTEMPTS HERE - RESTORED
-            safe_log("info", "✅ OFFLINE-FIRST SAVE COMPLETED - Local CSV, JSON backup, and PDF generated")
-            if todays_reports_folder:
-                safe_log("info", f"📂 PDF saved to today's reports folder: {todays_reports_folder}")
-            safe_log("info", "💡 Cloud backup available via Settings > Cloud Storage > Backup")
-            safe_log("info", "="*50)
-
-            # RESTORED: Check archive on EVERY complete record save
-            if is_complete_record:
-                try:
-                    safe_log("info", "🔍 Checking archive after complete record save...")
-                    archive_success, archive_message = self.check_and_archive()
-                    if archive_success:
-                        safe_log("info", f"📦 Archive completed: {archive_message}")
-                    else:
-                        safe_log("info", f"📦 Archive check: {archive_message}")
-                except Exception as archive_error:
-                    safe_log("error", f"Archive check error (non-critical): {archive_error}")
-            
-            # Return success and weighment info for the app to handle ticket flow - RESTORED
-            return {
-                'success': True,
-                'is_complete_record': is_complete_record,
-                'is_first_weighment_save': is_first_weighment_save,
-                'is_update': is_update,
-                'ticket_no': ticket_no,
-                'pdf_generated': pdf_generated,
-                'pdf_path': pdf_path,
-                'todays_reports_folder': todays_reports_folder
-            }
-                    
+                return {
+                    'success': True,
+                    'is_complete_record': is_complete,
+                    'is_update': is_update,
+                    'ticket_no': ticket_no
+                }
+            else:
+                self.safe_logger.error(f"❌ Failed to save record {ticket_no}")
+                return {'success': False, 'error': 'Failed to save to CSV'}
+        
         except Exception as e:
-            # SAFE ERROR LOGGING
-            try:
-                if not getattr(self, 'is_shutting_down', False):
-                    self.logger.error(f"❌ Critical error saving record: {e}")
-                else:
-                    print(f"[CRITICAL-ERROR] Critical error saving record: {e}")
-            except Exception:
-                print(f"[CRITICAL-ERROR] Critical error saving record: {e}")
-            
-            try:
-                if messagebox and not getattr(self, 'is_shutting_down', False):
-                    messagebox.showerror("Save Error", f"Failed to save record:\n{str(e)}")
-            except Exception:
-                print(f"[ERROR-DIALOG] Failed to save record: {e}")
-            
+            self.safe_logger.error(f"❌ Critical error saving record: {e}")
             return {'success': False, 'error': str(e)}
+
+    def _prepare_record_for_csv(self, data):
+        """Prepare record data for CSV writing"""
+        return {
+            'Date': data.get('date', ''),
+            'Time': data.get('time', ''),
+            'Site Name': data.get('site_name', ''),
+            'Agency Name': data.get('agency_name', ''),
+            'Material': data.get('material', ''),
+            'Ticket No': data.get('ticket_no', ''),
+            'Vehicle No': data.get('vehicle_no', ''),
+            'Transfer Party Name': data.get('transfer_party_name', ''),
+            'First Weight': data.get('first_weight', ''),
+            'First Timestamp': data.get('first_timestamp', ''),
+            'Second Weight': data.get('second_weight', ''),
+            'Second Timestamp': data.get('second_timestamp', ''),
+            'Net Weight': data.get('net_weight', ''),
+            'Material Type': data.get('material_type', ''),
+            'First Front Image': data.get('first_front_image', ''),
+            'First Back Image': data.get('first_back_image', ''),
+            'Second Front Image': data.get('second_front_image', ''),
+            'Second Back Image': data.get('second_back_image', ''),
+            'Site Incharge': data.get('site_incharge', ''),
+            'User Name': data.get('user_name', '')
+        }
 
     def normalize_record_keys(self, record):
         """Normalize CSV record keys to handle both formats (spaces and underscores)
@@ -453,45 +618,7 @@ class DataManager:
             self._safe_data_log("error", f"Error in get_filtered_records: {e}")
             return []
 
-    # Also update get_all_records to use normalization:
-    def get_all_records(self):
-        """Get all records with normalized keys - ENHANCED"""
-        # Check shutdown status first
-        if getattr(self, 'is_shutting_down', False):
-            print("🛑 DATA MANAGER: get_all_records blocked - shutdown in progress")
-            return []
-        
-        records = []
-        current_file = self.get_current_data_file()
-        
-        if not os.path.exists(current_file):
-            self._safe_data_log("warning", f"CSV file does not exist: {current_file}")
-            return records
-        
-        # Simple retry logic without complex context managers
-        for attempt in range(3):
-            try:
-                with open(current_file, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
-                    reader = csv.DictReader(csv_file)
-                    raw_records = list(reader)
-                
-                # Normalize all records
-                records = [self.normalize_record_keys(record) for record in raw_records]
-                
-                self._safe_data_log("info", f"Successfully loaded {len(records)} records")
-                return records
-                
-            except Exception as read_error:
-                error_str = str(read_error).lower()
-                if ("closed file" in error_str or "i/o operation" in error_str) and attempt < 2:
-                    print(f"[RETRY] get_all_records attempt {attempt + 1} failed, retrying: {read_error}")
-                    time.sleep(0.3 * (attempt + 1))
-                    continue
-                else:
-                    self._safe_data_log("error", f"Error reading records: {read_error}")
-                    return []
-        
-        return [] 
+ 
                     
     def _setup_fallback_folders(self):
         """Setup fallback folders when main setup fails"""
@@ -1771,7 +1898,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
             
             current_file = self.get_current_data_file()
             
-            with safe_csv_operation():
+            with safe_file_operation():
                 # Ensure the directory exists
                 os.makedirs(os.path.dirname(current_file), exist_ok=True)
                 
@@ -1902,8 +2029,13 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
         
         return self.today_pdf_folder
     
+
+    
     def create_pdf_report(self, records_data, save_path):
-        """FIXED: Create PDF report with 4-image grid and I/O error protection"""
+        """
+        ENHANCED: Create PDF report with better styling and fixed image processing
+        Combines your original styling with in-memory image processing (no temp files)
+        """
         if not REPORTLAB_AVAILABLE:
             self.logger.error("ReportLab not available for PDF generation")
             return False
@@ -1914,13 +2046,13 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 
                 doc = SimpleDocTemplate(save_path, pagesize=A4,
-                                        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+                                        rightMargin=20, leftMargin=20, 
+                                        topMargin=20, bottomMargin=20)
                 
                 styles = getSampleStyleSheet()
                 elements = []
-                temp_files_to_cleanup = []  # Track temp files for cleanup
 
-                # Create styles (keeping existing styles)
+                # ENHANCED STYLES (from your original)
                 header_style = ParagraphStyle(
                     name='HeaderStyle',
                     fontSize=18,
@@ -1968,6 +2100,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                     if i > 0:
                         elements.append(PageBreak())
 
+                    # ENHANCED HEADER SECTION (from your original)
                     # Get agency information from address config
                     agency_name = record.get('agency_name', 'Unknown Agency')
                     agency_info = self.address_config.get('agencies', {}).get(agency_name, {})
@@ -1999,7 +2132,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                     elements.append(Paragraph(f"Ticket No: {ticket_no}", header_style))
                     elements.append(Spacer(1, 0.15*inch))
 
-                    # Vehicle Information (keeping existing code)
+                    # ENHANCED VEHICLE INFORMATION SECTION (from your original)
                     elements.append(Paragraph("VEHICLE INFORMATION", section_header_style))
                     
                     material_value = record.get('material', '') or record.get('material_type', '')
@@ -2042,32 +2175,35 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                     elements.append(vehicle_table)
                     elements.append(Spacer(1, 0.15*inch))
 
-                    # Weighment Information (keeping existing code)
+                    # ENHANCED WEIGHMENT SECTION (from your original)
                     elements.append(Paragraph("WEIGHMENT DETAILS", section_header_style))
 
                     first_weight_str = record.get('first_weight', '').strip()
                     second_weight_str = record.get('second_weight', '').strip()
                     net_weight_str = record.get('net_weight', '').strip()
 
-                    # Force calculate net weight
-                    if first_weight_str and second_weight_str:
+                    # Force calculate net weight if not present
+                    if first_weight_str and second_weight_str and not net_weight_str:
                         try:
                             first_weight = float(first_weight_str)
                             second_weight = float(second_weight_str)
                             calculated_net = abs(first_weight - second_weight)
                             net_weight_str = f"{calculated_net:.2f}"
                         except:
-                            net_weight_str = "Error"
+                            net_weight_str = "Calculation Error"
 
-                    # Simple display values
+                    # Enhanced weighment display
                     first_display = f"{first_weight_str} kg" if first_weight_str else "Not captured"
                     second_display = f"{second_weight_str} kg" if second_weight_str else "Not captured"
                     net_display = f"{net_weight_str} kg" if net_weight_str else "Not calculated"
 
                     weighment_data = [
-                        ["First Weight:", first_display, "First Time:", record.get('first_timestamp', '') or "Not captured"],
-                        ["Second Weight:", second_display, "Second Time:", record.get('second_timestamp', '') or "Not captured"],
-                        ["", "", "Net Weight:", net_display]
+                        [Paragraph("<b>First Weight:</b>", label_style), Paragraph(first_display, value_style), 
+                        Paragraph("<b>First Time:</b>", label_style), Paragraph(record.get('first_timestamp', '') or "Not captured", value_style)],
+                        [Paragraph("<b>Second Weight:</b>", label_style), Paragraph(second_display, value_style), 
+                        Paragraph("<b>Second Time:</b>", label_style), Paragraph(record.get('second_timestamp', '') or "Not captured", value_style)],
+                        [Paragraph("", value_style), Paragraph("", value_style), 
+                        Paragraph("<b>Net Weight:</b>", label_style), Paragraph(f"<b>{net_display}</b>", value_style)]
                     ]
 
                     weighment_inner_table = Table(weighment_data, colWidths=[1.5*inch, 1.5*inch, 1.2*inch, 2.8*inch])
@@ -2081,24 +2217,44 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                         ('RIGHTPADDING', (0,0), (-1,-1), 6),
                         ('TOPPADDING', (0,0), (-1,-1), 6),
                         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                        # Make net weight row stand out
                         ('FONTNAME', (2,2), (3,2), 'Helvetica-Bold'),
                         ('FONTSIZE', (2,2), (3,2), 12),
                     ]))
 
                     weighment_table = Table([[weighment_inner_table]], colWidths=[7*inch])
+                    weighment_table.setStyle(TableStyle([
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('LEFTPADDING', (0,0), (-1,-1), 8),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+                        ('TOPPADDING', (0,0), (-1,-1), 8),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                    ]))
                     elements.append(weighment_table)
                     elements.append(Spacer(1, 0.15*inch))
 
-                    # FIXED: 4-Image Grid Section with better error handling
+                    # ENHANCED 4-IMAGE GRID SECTION (from your original but with FIXED processing)
                     elements.append(Paragraph("VEHICLE IMAGES (4-Image System)", section_header_style))
                     
-                    # Get all 4 image paths with validation
+                    # Get image paths
                     image_paths = [
-                        (record.get('first_front_image', ''), f"Ticket: {ticket_no}"),
-                        (record.get('first_back_image', ''), f"Ticket: {ticket_no}"),
-                        (record.get('second_front_image', ''), f"Ticket: {ticket_no}"),
-                        (record.get('second_back_image', ''), f"Ticket: {ticket_no}")
+                        record.get('first_front_image', ''),
+                        record.get('first_back_image', ''),
+                        record.get('second_front_image', ''),
+                        record.get('second_back_image', '')
                     ]
+                    
+                    # Image labels
+                    image_labels = [
+                        f"Ticket: {ticket_no} - 1st Front",
+                        f"Ticket: {ticket_no} - 1st Back", 
+                        f"Ticket: {ticket_no} - 2nd Front",
+                        f"Ticket: {ticket_no} - 2nd Back"
+                    ]
+
+                    # Enhanced image dimensions (from your original)
+                    IMG_WIDTH = 6.0*inch
+                    IMG_HEIGHT = 4.5*inch
 
                     # Create 2x2 image grid with headers
                     img_data = [
@@ -2108,78 +2264,64 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                         [None, None]   # Will be filled with second weighment images
                     ]
 
-                    # FIXED: Process all 4 images with enhanced error handling
+                    # FIXED: Process images in memory (no temp files)
                     processed_images = []
                     
-                    for idx, (img_filename, watermark_text) in enumerate(image_paths):
+                    for i, img_filename in enumerate(image_paths):
                         if img_filename and img_filename.strip():
                             # Build full path
                             img_path = os.path.join(config.IMAGES_FOLDER, img_filename.strip())
                             
                             if os.path.exists(img_path):
-                                try:
-                                    # Use the fixed prepare_image_for_pdf method
-                                    temp_img_path = self.prepare_image_for_pdf(img_path, watermark_text)
-                                    if temp_img_path and os.path.exists(temp_img_path):
-                                        # Create RLImage with error protection
-                                        processed_img = None
-                                        try:
-                                            processed_img = RLImage(temp_img_path, width=3.5*inch, height=2.0*inch)
-                                            processed_images.append(processed_img)
-                                            temp_files_to_cleanup.append(temp_img_path)
-                                            self.logger.debug(f"Successfully processed image {idx+1}: {img_filename}")
-                                        except Exception as rl_error:
-                                            self.logger.error(f"ReportLab error creating image {idx+1}: {rl_error}")
-                                            processed_images.append(f"Image {idx+1} processing failed")
-                                            # Clean up the temp file since we couldn't use it
-                                            try:
-                                                if os.path.exists(temp_img_path):
-                                                    os.remove(temp_img_path)
-                                            except:
-                                                pass
-                                    else:
-                                        processed_images.append(f"Image {idx+1} processing failed")
-                                        self.logger.warning(f"Failed to process image {idx+1}: {img_filename}")
-                                except Exception as e:
-                                    error_str = str(e)
-                                    if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
-                                        self.logger.error(f"File I/O error processing image {idx+1} {img_filename}: {e}")
-                                        processed_images.append(f"Image {idx+1} I/O error")
-                                    else:
-                                        self.logger.error(f"Error processing image {idx+1} {img_filename}: {e}")
-                                        processed_images.append(f"Image {idx+1} error")
+                                # Use in-memory processing (FIXED - no temp files)
+                                img_obj = self.create_image_object_in_memory(
+                                    img_path, 
+                                    image_labels[i],
+                                    width=IMG_WIDTH, 
+                                    height=IMG_HEIGHT
+                                )
+                                
+                                if img_obj:
+                                    processed_images.append(img_obj)
+                                    self.logger.debug(f"Successfully processed image: {img_filename}")
+                                else:
+                                    processed_images.append(f"Image processing failed\n{img_filename}")
+                                    self.logger.warning(f"Failed to process image: {img_filename}")
                             else:
-                                processed_images.append(f"Image {idx+1} not found")
+                                processed_images.append(f"Image file not found\n{img_filename}")
                                 self.logger.warning(f"Image file not found: {img_path}")
                         else:
-                            processed_images.append(f"No image {idx+1} captured")
-                            self.logger.debug(f"No image filename provided for position {idx+1}")
+                            processed_images.append("No image captured")
+                            self.logger.debug("No image filename provided")
 
                     # Fill the image grid
-                    img_data[1] = [processed_images[0], processed_images[1]]  # First weighment
-                    img_data[3] = [processed_images[2], processed_images[3]]  # Second weighment
+                    img_data[1] = [processed_images[0] if len(processed_images) > 0 else "1st Front\nImage not available", 
+                                processed_images[1] if len(processed_images) > 1 else "1st Back\nImage not available"]
+                    img_data[3] = [processed_images[2] if len(processed_images) > 2 else "2nd Front\nImage not available", 
+                                processed_images[3] if len(processed_images) > 3 else "2nd Back\nImage not available"]
 
-                    # Create images table with 2x2 grid
-                    img_table = Table(img_data, colWidths=[3.5*inch, 3.5*inch], 
-                                    rowHeights=[0.3*inch, 2*inch, 0.3*inch, 2*inch])
+                    # ENHANCED image table styling (from your original)
+                    img_table = Table(img_data, 
+                                    colWidths=[IMG_WIDTH, IMG_WIDTH],
+                                    rowHeights=[0.4*inch, IMG_HEIGHT, 0.4*inch, IMG_HEIGHT])
                     img_table.setStyle(TableStyle([
                         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
                         ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (1,0), 10),  # Header row 1
-                        ('FONTSIZE', (0,2), (1,2), 10),  # Header row 2
+                        ('FONTSIZE', (0,0), (1,0), 12),  # Increased header font size
+                        ('FONTSIZE', (0,2), (1,2), 12),  # Increased header font size
                         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('LEFTPADDING', (0,0), (-1,-1), 6),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                        ('TOPPADDING', (0,0), (-1,-1), 6),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                        ('LEFTPADDING', (0,0), (-1,-1), 6),    # Increased padding
+                        ('RIGHTPADDING', (0,0), (-1,-1), 6),   # Increased padding
+                        ('TOPPADDING', (0,0), (-1,-1), 6),     # Increased padding
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),  # Increased padding
                         # Header background
                         ('BACKGROUND', (0,0), (1,0), colors.lightgrey),
                         ('BACKGROUND', (0,2), (1,2), colors.lightgrey),
                     ]))
                     elements.append(img_table)
                     
-                    # Add operator signature line at bottom right
+                    # Enhanced signature section (from your original)
                     elements.append(Spacer(1, 0.3*inch))
                     
                     signature_table = Table([["", "Operator's Signature"]], colWidths=[5*inch, 2.5*inch])
@@ -2195,28 +2337,10 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                     ]))
                     elements.append(signature_table)
 
-                # Build the PDF with error protection
+                # Build the PDF
                 self.logger.info(f"Building PDF document: {save_path}")
-                try:
-                    doc.build(elements)
-                    self.logger.info("PDF document built successfully")
-                except Exception as build_error:
-                    self.logger.error(f"Error building PDF document: {build_error}")
-                    raise build_error
-                
-                # Clean up temporary files with enhanced error handling
-                cleanup_errors = []
-                for temp_file in temp_files_to_cleanup:
-                    try:
-                        if os.path.exists(temp_file):
-                            os.remove(temp_file)
-                            self.logger.debug(f"Cleaned up temporary file: {temp_file}")
-                    except Exception as cleanup_error:
-                        cleanup_errors.append(f"{temp_file}: {cleanup_error}")
-                        self.logger.warning(f"Could not clean up temporary file {temp_file}: {cleanup_error}")
-                
-                if cleanup_errors:
-                    self.logger.warning(f"Some temporary files could not be cleaned up: {cleanup_errors}")
+                doc.build(elements)
+                self.logger.info("PDF document built successfully")
                 
                 # Verify PDF was created
                 if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
@@ -2235,130 +2359,95 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
             import traceback
             self.logger.error(f"PDF generation traceback: {traceback.format_exc()}")
             return False
-    
-    def prepare_image_for_pdf(self, image_path, watermark_text):
-        """FIXED: Prepare image for PDF by resizing and adding watermark with I/O error protection"""
+
+    def create_image_object_in_memory(self, image_path, watermark_text, width=6.0*inch, height=4.5*inch):
+        """
+        ENHANCED: Create ReportLab Image object directly in memory with better quality
+        """
         try:
-            with safe_image_operation():
-                # Validate input path
-                if not image_path or not os.path.exists(image_path):
-                    self.logger.warning(f"Image path does not exist: {image_path}")
-                    return None
-                
-                self.logger.debug(f"Preparing image for PDF: {image_path}")
-                
-                # Read image with error handling and retry mechanism
-                img = None
-                for retry in range(3):  # Try up to 3 times
-                    try:
-                        img = cv2.imread(image_path)
-                        if img is not None:
-                            break
-                        elif retry < 2:  # Not the last retry
-                            time.sleep(0.1)  # Wait 100ms before retry
-                    except Exception as read_error:
-                        if retry < 2:  # Not the last retry
-                            self.logger.warning(f"Retry {retry + 1}: Error reading image {image_path}: {read_error}")
-                            time.sleep(0.1)
-                            continue
-                        else:
-                            raise read_error
-                
-                if img is None:
-                    self.logger.warning(f"Could not read image after retries: {image_path}")
-                    return None
-                
-                # Resize image for PDF (maintain aspect ratio)
-                height, width = img.shape[:2]
-                max_width = 400
-                max_height = 300
-                
-                # Calculate scaling factor
-                scale_w = max_width / width
-                scale_h = max_height / height
-                scale = min(scale_w, scale_h)
-                
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                
-                img_resized = cv2.resize(img, (new_width, new_height))
-                
-                # Add watermark with error protection
-                watermarked_img = img_resized  # Default fallback
-                try:
-                    from camera import add_watermark
-                    watermarked_img = add_watermark(img_resized, watermark_text)
-                    self.logger.debug("Watermark added successfully")
-                except ImportError:
-                    self.logger.warning("Watermark function not available, using image without watermark")
-                except Exception as watermark_error:
-                    # Check if it's a file I/O error
-                    if "closed file" in str(watermark_error).lower() or "I/O operation" in str(watermark_error).lower():
-                        self.logger.warning(f"File I/O error in watermark - using image without watermark: {watermark_error}")
-                    else:
-                        self.logger.warning(f"Watermark error: {watermark_error}, using image without watermark")
-                
-                # Create unique temporary filename with proper path
-                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-                temp_filename = f"temp_pdf_image_{timestamp}.jpg"
-                
-                # Ensure images folder exists
-                os.makedirs(config.IMAGES_FOLDER, exist_ok=True)
-                temp_path = os.path.join(config.IMAGES_FOLDER, temp_filename)
-                
-                # Save temporary file with error handling and retries
-                success = False
-                for retry in range(3):  # Try up to 3 times
-                    try:
-                        success = cv2.imwrite(temp_path, watermarked_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
-                        if success:
-                            break
-                        elif retry < 2:  # Not the last retry
-                            time.sleep(0.1)  # Wait 100ms before retry
-                    except Exception as write_error:
-                        if retry < 2:  # Not the last retry
-                            self.logger.warning(f"Retry {retry + 1}: Error writing temp image: {write_error}")
-                            time.sleep(0.1)
-                            continue
-                        else:
-                            self.logger.error(f"Failed to write temporary image after retries: {write_error}")
-                            return None
-                
-                if not success:
-                    self.logger.error(f"Failed to save temporary image: {temp_path}")
-                    return None
-                
-                # Verify the file was created and is readable
-                if not os.path.exists(temp_path):
-                    self.logger.error(f"Temporary image was not created: {temp_path}")
-                    return None
-                
-                # Verify file size
-                try:
-                    file_size = os.path.getsize(temp_path)
-                    if file_size == 0:
-                        self.logger.error(f"Temporary image is empty: {temp_path}")
-                        try:
-                            os.remove(temp_path)  # Clean up empty file
-                        except:
-                            pass
-                        return None
-                except OSError as size_error:
-                    self.logger.error(f"Could not check file size: {temp_path} - {size_error}")
-                    return None
-                
-                self.logger.debug(f"Successfully prepared temporary image: {temp_path}")
-                return temp_path
-                
+            # Validate input path
+            if not image_path or not os.path.exists(image_path):
+                self.safe_logger.warning(f"Image path does not exist: {image_path}")
+                return None
+            
+            self.safe_logger.debug(f"Processing image in memory: {image_path}")
+            
+            # Read image with OpenCV
+            img = cv2.imread(image_path)
+            if img is None:
+                self.safe_logger.warning(f"Could not read image: {image_path}")
+                return None
+            
+            # Get original dimensions
+            original_height, original_width = img.shape[:2]
+            
+            # Use high-quality dimensions
+            max_width = 1200   # High quality
+            max_height = 900   # High quality
+            
+            # Calculate scaling factor
+            scale_w = max_width / original_width
+            scale_h = max_height / original_height
+            scale = min(scale_w, scale_h)
+            
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            
+            # Use high-quality interpolation
+            img_resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+            
+            # Add watermark if available
+            try:
+                from camera import add_watermark
+                watermarked_img = add_watermark(img_resized, watermark_text)
+                self.safe_logger.debug("Watermark added successfully")
+            except ImportError:
+                self.safe_logger.warning("Watermark function not available, using image without watermark")
+                watermarked_img = img_resized
+            except Exception as watermark_error:
+                self.safe_logger.warning(f"Watermark error: {watermark_error}, using image without watermark")
+                watermarked_img = img_resized
+            
+            # Convert OpenCV image (BGR) to PIL Image (RGB)
+            img_rgb = cv2.cvtColor(watermarked_img, cv2.COLOR_BGR2RGB)
+            pil_image = PILImage.fromarray(img_rgb)
+            
+            # Create BytesIO object to hold image data in memory
+            img_buffer = BytesIO()
+            # Use high quality (100% JPEG quality)
+            pil_image.save(img_buffer, format='JPEG', quality=100)
+            img_buffer.seek(0)  # Reset buffer position to beginning
+            
+            # Create ReportLab Image object from BytesIO buffer
+            rl_image = RLImage(img_buffer, width=width, height=height)
+            
+            self.safe_logger.debug(f"Successfully created in-memory image object for: {image_path}")
+            return rl_image
+            
         except Exception as e:
-            # Enhanced error reporting for debugging
-            error_str = str(e)
-            if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
-                self.logger.error(f"File I/O error preparing image for PDF: {e}")
-            else:
-                self.logger.error(f"Error preparing image for PDF: {e}")
+            self.safe_logger.error(f"Error creating in-memory image object: {e}")
+            import traceback
+            self.safe_logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
 
+
+    def shutdown(self):
+        """Graceful shutdown of DataManager"""
+        try:
+            self.is_shutting_down = True
+            self.safe_logger.info("DataManager shutting down...")
+            
+            # Close any open file handles
+            if hasattr(self, 'logger') and self.logger:
+                for handler in self.logger.handlers:
+                    try:
+                        handler.close()
+                    except:
+                        pass
+            
+            self.safe_logger.info("DataManager shutdown completed")
+        except Exception as e:
+            print(f"Error during DataManager shutdown: {e}")
     # ========== CLOUD STORAGE METHODS (ONLY USED WHEN EXPLICITLY REQUESTED) ==========
     
     def init_cloud_storage_if_needed(self):
