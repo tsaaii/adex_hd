@@ -147,7 +147,7 @@ class SummaryPanel:
         self.summary_tree.tag_configure("oddrow", background=config.COLORS["table_row_odd"])
     
     def update_summary(self):
-        """Update the summary tree with recent records - FIXED header mapping"""
+        """Update the summary tree with recent records - ENHANCED with descending time order"""
         # Clear existing items
         for item in self.summary_tree.get_children():
             self.summary_tree.delete(item)
@@ -161,17 +161,68 @@ class SummaryPanel:
         
         print(f"🔍 SUMMARY DEBUG: Retrieved {len(records)} records for display")
         
-        # Show most recent first (limited to 300 for performance)
-        recent_records = records[-300:] if len(records) > 300 else records
-        recent_records.reverse()  # Most recent first
+        # ENHANCED: Sort records by date and time in descending order (most recent first)
+        try:
+            def get_datetime_for_sorting(record):
+                """Extract datetime for sorting - handles both old and new formats"""
+                try:
+                    # Handle both old format (underscores) and new format (spaces) for compatibility
+                    date_str = record.get('Date', '') or record.get('date', '')
+                    time_str = record.get('Time', '') or record.get('time', '')
+                    
+                    if not date_str:
+                        return datetime.datetime.min  # Put records without dates at the end
+                    
+                    # Parse date (format: DD-MM-YYYY)
+                    if date_str:
+                        date_obj = datetime.datetime.strptime(date_str, "%d-%m-%Y")
+                        
+                        # Add time if available (format: HH:MM:SS)
+                        if time_str:
+                            try:
+                                time_parts = time_str.split(':')
+                                hour = int(time_parts[0]) if len(time_parts) > 0 else 0
+                                minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                                second = int(time_parts[2]) if len(time_parts) > 2 else 0
+                                
+                                date_obj = date_obj.replace(hour=hour, minute=minute, second=second)
+                            except (ValueError, IndexError):
+                                # If time parsing fails, use date only
+                                pass
+                        
+                        return date_obj
+                    else:
+                        return datetime.datetime.min
+                        
+                except (ValueError, TypeError) as e:
+                    print(f"⚠️  Date parsing error for record: {e}")
+                    return datetime.datetime.min
+            
+            # Sort records by datetime in descending order (most recent first)
+            sorted_records = sorted(records, key=get_datetime_for_sorting, reverse=True)
+            
+            print(f"📅 SORT DEBUG: Sorted {len(sorted_records)} records by date/time (descending)")
+            
+            # Show most recent first (limited to 300 for performance)
+            recent_records = sorted_records[:300] if len(sorted_records) > 300 else sorted_records
+            
+            print(f"📊 DISPLAY DEBUG: Showing {len(recent_records)} most recent records")
+            
+        except Exception as e:
+            print(f"❌ SORT ERROR: {e} - falling back to original order")
+            # Fallback to original logic if sorting fails
+            recent_records = records[-300:] if len(records) > 300 else records
+            recent_records.reverse()  # Most recent first
         
-        for record in recent_records:
+        # Display records in the tree
+        for i, record in enumerate(recent_records):
             # FIXED: Map CSV headers (with spaces) to the data we need
             # CSV headers: 'Date', 'Time', 'Site Name', 'Agency Name', 'Material', 'Ticket No', 'Vehicle No', etc.
             
             try:
                 # Handle both old format (underscores) and new format (spaces) for compatibility
                 date = record.get('Date', '') or record.get('date', '')
+                time = record.get('Time', '') or record.get('time', '')  # ENHANCED: Show time
                 vehicle = record.get('Vehicle No', '') or record.get('vehicle_no', '')
                 ticket = record.get('Ticket No', '') or record.get('ticket_no', '')
                 agency = record.get('Agency Name', '') or record.get('agency_name', '')
@@ -180,40 +231,53 @@ class SummaryPanel:
                 second_weight = record.get('Second Weight', '') or record.get('second_weight', '')
                 net_weight = record.get('Net Weight', '') or record.get('net_weight', '')
                 
+                # ENHANCED: Format datetime display for better readability
+                datetime_display = f"{date}"
+                if time:
+                    # Show time in 24-hour format
+                    datetime_display = f"{date} {time}"
+                
                 # Count images (simplified)
                 image_count = 0
-                for img_field in ['First Front Image', 'First Back Image', 'Second Front Image', 'Second Back Image']:
-                    if record.get(img_field, '').strip():
+                for img_field in ['First Front Image', 'First Back Image', 'Second Front Image', 'Second Back Image',
+                                'first_front_image', 'first_back_image', 'second_front_image', 'second_back_image']:
+                    if record.get(img_field, ''):
                         image_count += 1
                 
-                # Also check old format
-                for img_field in ['first_front_image', 'first_back_image', 'second_front_image', 'second_back_image']:
-                    if record.get(img_field, '').strip():
-                        image_count += 1
+                # Status based on weights
+                status = "Complete" if (first_weight and second_weight) else "Incomplete"
                 
-                images_display = f"{image_count}/4"
+                # ENHANCED: Add visual indicators for recent records
+                status_indicator = ""
+                if i < 5:  # Top 5 most recent
+                    status_indicator = "🟢 "  # Green dot for very recent
+                elif i < 20:  # Top 20 most recent
+                    status_indicator = "🟡 "  # Yellow dot for recent
                 
-                print(f"🔍 SUMMARY DEBUG: Adding record - Ticket: {ticket}, Vehicle: {vehicle}, Agency: {agency}")
-                
-                # Add to tree
-                self.summary_tree.insert("", 0, values=(
-                    date,
-                    vehicle,
+                # Insert into tree with enhanced datetime display
+                self.summary_tree.insert("", "end", values=(
                     ticket,
+                    datetime_display,  # ENHANCED: Shows both date and time
+                    vehicle,
                     agency,
                     material,
                     first_weight,
                     second_weight,
                     net_weight,
-                    images_display
+                    f"{status_indicator}{status}",  # ENHANCED: Visual status indicator
+                    image_count
                 ))
                 
             except Exception as e:
-                print(f"🔍 SUMMARY DEBUG: Error processing record: {e}")
-                print(f"🔍 SUMMARY DEBUG: Record keys: {list(record.keys())}")
+                print(f"❌ Error displaying record {i}: {e}")
                 continue
         
-        print(f"🔍 SUMMARY DEBUG: Added {len(self.summary_tree.get_children())} records to summary view")
+        # Apply row colors
+        self._apply_row_colors()
+        
+        print(f"✅ SUMMARY UPDATE: Displayed {len(recent_records)} records in descending time order")
+
+
 
     def apply_filter(self, *args):
         """Apply filter and refresh display - FIXED"""

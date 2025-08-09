@@ -15,20 +15,13 @@ from threading import Lock
 from io import BytesIO
 from PIL import Image as PILImage
 import contextlib
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-
 import cv2
 # ADD THESE SAFE OPERATION FUNCTIONS after imports:
+from trip_report_generator import auto_generate_on_completion, is_record_complete as trip_is_complete
 
 # Global lock for all file operations
 _global_file_lock = threading.RLock()
-_pdf_generation_lock = threading.RLock()
+
 class SafeLogger:
     """Thread-safe logger that handles closed file scenarios gracefully"""
     
@@ -322,9 +315,6 @@ class DataManager:
         # Ensure we have all required folder attributes after setup
         self._ensure_folder_attributes()
         
-        # Load address config for PDF generation
-        self.address_config = self.load_address_config()
-        
         # DO NOT initialize cloud storage here - only when explicitly requested
         self.cloud_storage = None
         
@@ -457,11 +447,11 @@ class DataManager:
                     'ticket_no': ticket_no
                 }
             else:
-                self.safe_logger.error(f"❌ Failed to save record {ticket_no}")
+                self.safe_logger.error(f" Failed to save record {ticket_no}")
                 return {'success': False, 'error': 'Failed to save to CSV'}
         
         except Exception as e:
-            self.safe_logger.error(f"❌ Critical error saving record: {e}")
+            self.safe_logger.error(f" Critical error saving record: {e}")
             return {'success': False, 'error': str(e)}
 
     def _prepare_record_for_csv(self, data):
@@ -865,10 +855,8 @@ class DataManager:
 
 
     def get_todays_reports_folder(self):
-        """Get or create today's reports folder in data/reports/YYYY-MM-DD format
-        
-        Returns:
-            str: Path to today's reports folder
+        """
+        SIMPLIFIED: Get today's reports folder (trip_report_generator manages date folders)
         """
         try:
             import datetime
@@ -879,23 +867,18 @@ class DataManager:
             
             # Create today's folder with YYYY-MM-DD format
             today = datetime.datetime.now()
-            today_folder_name = today.strftime("%Y-%m-%d")  # Format: 2025-05-29
+            today_folder_name = today.strftime("%Y-%m-%d")
             todays_folder = os.path.join(base_reports_folder, today_folder_name)
             
             # Ensure today's folder exists
             os.makedirs(todays_folder, exist_ok=True)
             
-            self.logger.info(f"Today's reports folder ensured: {todays_folder}")
-            
-            # Update the DataManager's today_pdf_folder reference
-            self.today_pdf_folder = todays_folder
-            
             return todays_folder
             
         except Exception as e:
-            self.logger.error(f"Error creating today's reports folder: {e}")
-            # Fallback to data folder
-            fallback_folder = config.DATA_FOLDER
+            self.logger.error(f"Error getting today's reports folder: {e}")
+            # Fallback
+            fallback_folder = os.path.join(config.DATA_FOLDER, 'reports')
             os.makedirs(fallback_folder, exist_ok=True)
             return fallback_folder
 
@@ -1175,106 +1158,51 @@ class DataManager:
             print(f"[{level.upper()}] {message}")
 
 
-    def auto_generate_pdf_for_complete_record(self, record_data):
-        """Automatically generate PDF for a complete record - Save to today's reports folder
-        
-        Args:
-            record_data: Complete record data dictionary
-            
-        Returns:
-            tuple: (success, pdf_path)
+    def auto_generate_pdf_on_completion(self, record_data):
         """
-        # Check if ReportLab is available
+        NEW: Use trip_report_generator for PDF generation
+        """
         try:
-            global REPORTLAB_AVAILABLE
-            if not REPORTLAB_AVAILABLE:
-                self.logger.warning("ReportLab not available - skipping PDF generation")
-                return False, None
-        except:
-            self.logger.warning("PDF generation not available")
-            return False, None
-        
-        try:
-            # Check if record is complete (both weighments)
-            if not self.is_record_complete(record_data):
-                self.logger.info("Record incomplete - skipping PDF generation")
+            # Check if record is complete
+            if not trip_is_complete(record_data):
+                self.logger.info("Record incomplete - skipping trip report generation")
                 return False, None
             
-            # Get today's reports folder
-            todays_reports_folder = self.get_todays_reports_folder()
-            
-            # Generate PDF filename
-            ticket_no = record_data.get('ticket_no', 'Unknown').replace('/', '_')
-            vehicle_no = record_data.get('vehicle_no', 'Unknown').replace('/', '_').replace(' ', '_')
-            site_name = record_data.get('site_name', 'Unknown').replace(' ', '_').replace('/', '_')
-            agency_name = record_data.get('agency_name', 'Unknown').replace(' ', '_').replace('/', '_')
-            timestamp = datetime.datetime.now().strftime("%H%M%S")
-            
-            # PDF filename format: AgencyName_SiteName_TicketNo_VehicleNo_HHMMSS.pdf
-            pdf_filename = f"{agency_name}_{site_name}_{ticket_no}_{vehicle_no}_{timestamp}.pdf"
-            
-            # Full path to save PDF in today's reports folder
-            pdf_path = os.path.join(todays_reports_folder, pdf_filename)
-            
-            # Generate the PDF
-            success = self.create_pdf_report([record_data], pdf_path)
+            # Use new trip report generator
+            success, pdf_path = auto_generate_on_completion(record_data)
             
             if success:
-                self.logger.info(f"Auto-generated PDF: {pdf_path}")
-                self.logger.info(f"PDF saved to today's reports folder: {todays_reports_folder}")
+                self.logger.info(f"Auto-generated trip report: {pdf_path}")
                 return True, pdf_path
             else:
-                self.logger.error("Failed to generate PDF")
+                self.logger.warning("Failed to auto-generate trip report")
                 return False, None
                 
         except Exception as e:
-            self.logger.error(f"Error in auto PDF generation (non-critical): {e}")
+            self.logger.error(f"Error in auto trip report generation: {e}")
             return False, None
 
-    def setup_daily_pdf_folders(self):
-        """Set up daily folder structure for PDF generation - Updated for data/reports structure"""
+    def auto_generate_pdf_for_complete_record(self, record_data):
+        """Automatically generate PDF using trip_report_generator"""
         try:
-            # Create base reports folder structure
-            self.base_reports_folder = os.path.join(config.DATA_FOLDER, 'reports')
-            os.makedirs(self.base_reports_folder, exist_ok=True)
+            from trip_report_generator import auto_generate_on_completion, is_record_complete
             
-            # Get today's folder
-            today = datetime.datetime.now()
-            self.today_folder_name = today.strftime("%Y-%m-%d")  # Format: 2025-05-29
-            self.today_pdf_folder = os.path.join(self.base_reports_folder, self.today_folder_name)
-            os.makedirs(self.today_pdf_folder, exist_ok=True)
-            
-            self.logger.info(f"Daily PDF folder structure ready:")
-            self.logger.info(f"  Base reports folder: {self.base_reports_folder}")
-            self.logger.info(f"  Today's folder: {self.today_pdf_folder}")
-            
-            # Create a README file in the base reports folder if it doesn't exist
-            readme_path = os.path.join(self.base_reports_folder, "README.txt")
-            if not os.path.exists(readme_path):
-                with open(readme_path, 'w') as f:
-                    f.write("""REPORTS FOLDER STRUCTURE
-    =========================
-
-    This folder contains daily reports organized by date.
-
-    Structure:
-    data/reports/
-    ├── YYYY-MM-DD/          # Daily folder (e.g., 2025-05-29)
-    │   ├── report1.pdf      # Auto-generated PDFs for complete weighments
-    │   ├── report2.pdf      # Each PDF contains vehicle info, weights, and images
-    │   └── [more PDFs...]   # Named: Agency_Site_Ticket_Vehicle_Time.pdf
-    ├── YYYY-MM-DD/
-    │   └── [more reports...]
-    └── README.txt           # This file
-
-    GENERATED BY: Swaccha Andhra Corporation Weighbridge System
-    OFFLINE-FIRST: All reports saved locally first, cloud backup available via Settings
-    """)
-            
+            if is_record_complete(record_data):
+                success, pdf_path = auto_generate_on_completion(record_data)
+                if success:
+                    self.logger.info(f" Auto-generated trip report: {pdf_path}")
+                    return True, pdf_path
+                else:
+                    self.logger.warning(" Failed to generate trip report")
+                    return False, None
+            else:
+                self.logger.info("Record incomplete - skipping trip report generation")
+                return False, None
         except Exception as e:
-            self.logger.error(f"Error setting up daily PDF folders: {e}")
-            # Fallback to data folder
-            self.today_pdf_folder = config.DATA_FOLDER
+            self.logger.error(f"Trip report generation error: {e}")
+            return False, None
+
+
 
     def save_to_cloud_with_images(self, data):
         """Save record with images to Google Cloud Storage - ONLY WHEN EXPLICITLY CALLED"""
@@ -1386,35 +1314,6 @@ class DataManager:
         except Exception as e:
             self._safe_data_log("error", f"Error checking record completion: {e}")
             return False
-
-    def get_daily_pdf_folder(self):
-        """Get or create today's PDF folder"""
-        try:
-            today = datetime.datetime.now()
-            folder_name = today.strftime("%Y-%m-%d")  # Format: 28-05
-            
-            # Check if we need to create a new folder (date changed)
-            if not hasattr(self, 'today_folder_name') or self.today_folder_name != folder_name:
-                self.today_folder_name = folder_name
-                
-                # Ensure base folder exists
-                if not hasattr(self, 'pdf_reports_folder'):
-                    self.pdf_reports_folder = os.path.join(config.DATA_FOLDER, 'daily_reports')
-                    os.makedirs(self.pdf_reports_folder, exist_ok=True)
-                
-                # Create today's folder
-                self.today_pdf_folder = os.path.join(self.pdf_reports_folder, folder_name)
-                os.makedirs(self.today_pdf_folder, exist_ok=True)
-                self.logger.info(f"Created new daily folder: {self.today_pdf_folder}")
-            
-            return self.today_pdf_folder
-            
-        except Exception as e:
-            self.logger.error(f"Error getting daily PDF folder: {e}")
-            # Fallback
-            fallback_folder = os.path.join(config.DATA_FOLDER, 'reports')
-            os.makedirs(fallback_folder, exist_ok=True)
-            return fallback_folder
 
     def create_folder_readme_files(self):
         """Create README files explaining folder structure"""
@@ -1570,46 +1469,19 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
 
     
     def load_address_config(self):
-        """Load address configuration for PDF generation"""
+        """
+        SIMPLIFIED: Load address configuration (trip_report_generator handles PDF usage)
+        """
         try:
             config_file = os.path.join(config.DATA_FOLDER, 'address_config.json')
             if os.path.exists(config_file):
                 with open(config_file, 'r') as f:
                     return json.load(f)
             else:
-                # Create default config for PDF generation
-                default_config = {
-                    "agencies": {
-                        "Default Agency": {
-                            "name": "Default Agency",
-                            "address": "123 Main Street\nCity, State - 123456",
-                            "contact": "+91-1234567890",
-                            "email": "info@agency.com"
-                        },
-                        "Tharuni": {
-                            "name": "Tharuni Environmental Services",
-                            "address": "Environmental Complex\nGuntur, Andhra Pradesh - 522001",
-                            "contact": "+91-9876543210",
-                            "email": "info@tharuni.com"
-                        }
-                    },
-                    "sites": {
-                        "Guntur": {
-                            "name": "Guntur Processing Site",
-                            "address": "Industrial Area, Guntur\nAndhra Pradesh - 522001",
-                            "contact": "+91-9876543210"
-                        }
-                    }
-                }
-                
-                # Save default config
-                os.makedirs(config.DATA_FOLDER, exist_ok=True)
-                with open(config_file, 'w') as f:
-                    json.dump(default_config, f, indent=4)
-                
-                return default_config
+                # Return minimal default - trip_report_generator creates full defaults
+                return {"agencies": {}, "sites": {}}
         except Exception as e:
-            self.logger.error(f"Error loading address config for PDF: {e}")
+            self.logger.error(f"Error loading address config: {e}")
             return {"agencies": {}, "sites": {}}
 
     def get_current_data_file(self):
@@ -2014,6 +1886,38 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
             self.logger.error(f" Error updating record: {e}")
             return False
 
+    def auto_generate_trip_report_on_completion(self, record_data):
+        """
+        Automatically generate trip report when a record is completed
+        
+        Args:
+            record_data (dict): Record data dictionary
+            
+        Returns:
+            tuple: (success: bool, pdf_path: str or None)
+        """
+        try:
+            # Import here to avoid circular imports
+            from trip_report_generator import auto_generate_on_completion
+            
+            # Check if record is complete before attempting generation
+            if not self.is_record_complete(record_data):
+                self.logger.info("Record incomplete - skipping auto trip report generation")
+                return False, None
+            
+            # Generate trip report
+            success, pdf_path = auto_generate_on_completion(record_data)
+            
+            if success:
+                self.logger.info(f"Auto-generated trip report: {pdf_path}")
+                return True, pdf_path
+            else:
+                self.logger.warning("Failed to auto-generate trip report")
+                return False, None
+                
+        except Exception as e:
+            self.logger.error(f"Error in auto trip report generation: {e}")
+            return False, None
 
 
     def get_daily_pdf_folder(self):
@@ -2029,407 +1933,6 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
         
         return self.today_pdf_folder
     
-
-    
-    def create_pdf_report(self, records_data, save_path):
-        """
-        ENHANCED: Create PDF report with better styling and fixed image processing
-        Combines your original styling with in-memory image processing (no temp files)
-        """
-        if not REPORTLAB_AVAILABLE:
-            self.logger.error("ReportLab not available for PDF generation")
-            return False
-            
-        try:
-            with _pdf_generation_lock:  # Prevent concurrent PDF generation
-                # Ensure output directory exists
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                
-                doc = SimpleDocTemplate(save_path, pagesize=A4,
-                                        rightMargin=20, leftMargin=20, 
-                                        topMargin=20, bottomMargin=20)
-                
-                styles = getSampleStyleSheet()
-                elements = []
-
-                # ENHANCED STYLES (from your original)
-                header_style = ParagraphStyle(
-                    name='HeaderStyle',
-                    fontSize=18,
-                    alignment=TA_CENTER,
-                    fontName='Helvetica-Bold',
-                    textColor=colors.black,
-                    spaceAfter=6,
-                    spaceBefore=6
-                )
-                
-                subheader_style = ParagraphStyle(
-                    name='SubHeaderStyle',
-                    fontSize=12,
-                    alignment=TA_CENTER,
-                    fontName='Helvetica',
-                    textColor=colors.black,
-                    spaceAfter=12
-                )
-                
-                section_header_style = ParagraphStyle(
-                    name='SectionHeader',
-                    fontSize=13,
-                    alignment=TA_CENTER,
-                    fontName='Helvetica-Bold',
-                    textColor=colors.black,
-                    spaceAfter=6,
-                    spaceBefore=6
-                )
-
-                label_style = ParagraphStyle(
-                    name='LabelStyle',
-                    fontSize=11,
-                    fontName='Helvetica-Bold',
-                    textColor=colors.black
-                )
-
-                value_style = ParagraphStyle(
-                    name='ValueStyle',
-                    fontSize=11,
-                    fontName='Helvetica',
-                    textColor=colors.black
-                )
-
-                for i, record in enumerate(records_data):
-                    if i > 0:
-                        elements.append(PageBreak())
-
-                    # ENHANCED HEADER SECTION (from your original)
-                    # Get agency information from address config
-                    agency_name = record.get('agency_name', 'Unknown Agency')
-                    agency_info = self.address_config.get('agencies', {}).get(agency_name, {})
-                    
-                    # Header Section with Agency Info
-                    elements.append(Paragraph(agency_info.get('name', agency_name), header_style))
-                    
-                    if agency_info.get('address'):
-                        address_text = agency_info.get('address', '').replace('\n', '<br/>')
-                        elements.append(Paragraph(address_text, subheader_style))
-                    
-                    # Contact information
-                    contact_info = []
-                    if agency_info.get('contact'):
-                        contact_info.append(f"Phone: {agency_info.get('contact')}")
-                    if agency_info.get('email'):
-                        contact_info.append(f"Email: {agency_info.get('email')}")
-                    
-                    if contact_info:
-                        elements.append(Paragraph(" | ".join(contact_info), subheader_style))
-                    
-                    elements.append(Spacer(1, 0.2*inch))
-
-                    # Print date and ticket information
-                    print_date = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    ticket_no = record.get('ticket_no', '000')
-                    
-                    elements.append(Paragraph(f"Print Date: {print_date}", value_style))
-                    elements.append(Paragraph(f"Ticket No: {ticket_no}", header_style))
-                    elements.append(Spacer(1, 0.15*inch))
-
-                    # ENHANCED VEHICLE INFORMATION SECTION (from your original)
-                    elements.append(Paragraph("VEHICLE INFORMATION", section_header_style))
-                    
-                    material_value = record.get('material', '') or record.get('material_type', '')
-                    user_name_value = record.get('user_name', '') or "Not specified"
-                    site_incharge_value = record.get('site_incharge', '') or "Not specified"
-                    
-                    vehicle_data = [
-                        [Paragraph("<b>Vehicle No:</b>", label_style), Paragraph(record.get('vehicle_no', ''), value_style), 
-                        Paragraph("<b>Date:</b>", label_style), Paragraph(record.get('date', ''), value_style), 
-                        Paragraph("<b>Time:</b>", label_style), Paragraph(record.get('time', ''), value_style)],
-                        [Paragraph("<b>Material:</b>", label_style), Paragraph(material_value, value_style), 
-                        Paragraph("<b>Site Name:</b>", label_style), Paragraph(record.get('site_name', ''), value_style), 
-                        Paragraph("<b>Transfer Party:</b>", label_style), Paragraph(record.get('transfer_party_name', ''), value_style)],
-                        [Paragraph("<b>Agency Name:</b>", label_style), Paragraph(record.get('agency_name', ''), value_style), 
-                        Paragraph("<b>User Name:</b>", label_style), Paragraph(user_name_value, value_style), 
-                        Paragraph("<b>Site Incharge:</b>", label_style), Paragraph(site_incharge_value, value_style)]
-                    ]
-                    
-                    vehicle_inner_table = Table(vehicle_data, colWidths=[1.2*inch, 1.3*inch, 1.0*inch, 1.3*inch, 1.2*inch, 1.5*inch])
-                    vehicle_inner_table.setStyle(TableStyle([
-                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                        ('FONTSIZE', (0,0), (-1,-1), 13),
-                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('LEFTPADDING', (0,0), (-1,-1), 2),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 2),
-                        ('TOPPADDING', (0,0), (-1,-1), 4),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                    ]))
-                    
-                    vehicle_table = Table([[vehicle_inner_table]], colWidths=[7.5*inch])
-                    vehicle_table.setStyle(TableStyle([
-                        ('GRID', (0,0), (-1,-1), 1, colors.black),
-                        ('LEFTPADDING', (0,0), (-1,-1), 12),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 12),
-                        ('TOPPADDING', (0,0), (-1,-1), 8),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-                        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ]))
-                    elements.append(vehicle_table)
-                    elements.append(Spacer(1, 0.15*inch))
-
-                    # ENHANCED WEIGHMENT SECTION (from your original)
-                    elements.append(Paragraph("WEIGHMENT DETAILS", section_header_style))
-
-                    first_weight_str = record.get('first_weight', '').strip()
-                    second_weight_str = record.get('second_weight', '').strip()
-                    net_weight_str = record.get('net_weight', '').strip()
-
-                    # Force calculate net weight if not present
-                    if first_weight_str and second_weight_str and not net_weight_str:
-                        try:
-                            first_weight = float(first_weight_str)
-                            second_weight = float(second_weight_str)
-                            calculated_net = abs(first_weight - second_weight)
-                            net_weight_str = f"{calculated_net:.2f}"
-                        except:
-                            net_weight_str = "Calculation Error"
-
-                    # Enhanced weighment display
-                    first_display = f"{first_weight_str} kg" if first_weight_str else "Not captured"
-                    second_display = f"{second_weight_str} kg" if second_weight_str else "Not captured"
-                    net_display = f"{net_weight_str} kg" if net_weight_str else "Not calculated"
-
-                    weighment_data = [
-                        [Paragraph("<b>First Weight:</b>", label_style), Paragraph(first_display, value_style), 
-                        Paragraph("<b>First Time:</b>", label_style), Paragraph(record.get('first_timestamp', '') or "Not captured", value_style)],
-                        [Paragraph("<b>Second Weight:</b>", label_style), Paragraph(second_display, value_style), 
-                        Paragraph("<b>Second Time:</b>", label_style), Paragraph(record.get('second_timestamp', '') or "Not captured", value_style)],
-                        [Paragraph("", value_style), Paragraph("", value_style), 
-                        Paragraph("<b>Net Weight:</b>", label_style), Paragraph(f"<b>{net_display}</b>", value_style)]
-                    ]
-
-                    weighment_inner_table = Table(weighment_data, colWidths=[1.5*inch, 1.5*inch, 1.2*inch, 2.8*inch])
-                    weighment_inner_table.setStyle(TableStyle([
-                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                        ('FONTSIZE', (0,0), (-1,-1), 11),
-                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('GRID', (0,0), (-1,-1), 1, colors.black),
-                        ('LEFTPADDING', (0,0), (-1,-1), 6),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                        ('TOPPADDING', (0,0), (-1,-1), 6),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-                        # Make net weight row stand out
-                        ('FONTNAME', (2,2), (3,2), 'Helvetica-Bold'),
-                        ('FONTSIZE', (2,2), (3,2), 12),
-                    ]))
-
-                    weighment_table = Table([[weighment_inner_table]], colWidths=[7*inch])
-                    weighment_table.setStyle(TableStyle([
-                        ('GRID', (0,0), (-1,-1), 1, colors.black),
-                        ('LEFTPADDING', (0,0), (-1,-1), 8),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 8),
-                        ('TOPPADDING', (0,0), (-1,-1), 8),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-                    ]))
-                    elements.append(weighment_table)
-                    elements.append(Spacer(1, 0.15*inch))
-
-                    # ENHANCED 4-IMAGE GRID SECTION (from your original but with FIXED processing)
-                    elements.append(Paragraph("VEHICLE IMAGES (4-Image System)", section_header_style))
-                    
-                    # Get image paths
-                    image_paths = [
-                        record.get('first_front_image', ''),
-                        record.get('first_back_image', ''),
-                        record.get('second_front_image', ''),
-                        record.get('second_back_image', '')
-                    ]
-                    
-                    # Image labels
-                    image_labels = [
-                        f"Ticket: {ticket_no} - 1st Front",
-                        f"Ticket: {ticket_no} - 1st Back", 
-                        f"Ticket: {ticket_no} - 2nd Front",
-                        f"Ticket: {ticket_no} - 2nd Back"
-                    ]
-
-                    # Enhanced image dimensions (from your original)
-                    IMG_WIDTH = 6.0*inch
-                    IMG_HEIGHT = 4.5*inch
-
-                    # Create 2x2 image grid with headers
-                    img_data = [
-                        ["1ST WEIGHMENT - FRONT", "1ST WEIGHMENT - BACK"],
-                        [None, None],  # Will be filled with first weighment images
-                        ["2ND WEIGHMENT - FRONT", "2ND WEIGHMENT - BACK"], 
-                        [None, None]   # Will be filled with second weighment images
-                    ]
-
-                    # FIXED: Process images in memory (no temp files)
-                    processed_images = []
-                    
-                    for i, img_filename in enumerate(image_paths):
-                        if img_filename and img_filename.strip():
-                            # Build full path
-                            img_path = os.path.join(config.IMAGES_FOLDER, img_filename.strip())
-                            
-                            if os.path.exists(img_path):
-                                # Use in-memory processing (FIXED - no temp files)
-                                img_obj = self.create_image_object_in_memory(
-                                    img_path, 
-                                    image_labels[i],
-                                    width=IMG_WIDTH, 
-                                    height=IMG_HEIGHT
-                                )
-                                
-                                if img_obj:
-                                    processed_images.append(img_obj)
-                                    self.logger.debug(f"Successfully processed image: {img_filename}")
-                                else:
-                                    processed_images.append(f"Image processing failed\n{img_filename}")
-                                    self.logger.warning(f"Failed to process image: {img_filename}")
-                            else:
-                                processed_images.append(f"Image file not found\n{img_filename}")
-                                self.logger.warning(f"Image file not found: {img_path}")
-                        else:
-                            processed_images.append("No image captured")
-                            self.logger.debug("No image filename provided")
-
-                    # Fill the image grid
-                    img_data[1] = [processed_images[0] if len(processed_images) > 0 else "1st Front\nImage not available", 
-                                processed_images[1] if len(processed_images) > 1 else "1st Back\nImage not available"]
-                    img_data[3] = [processed_images[2] if len(processed_images) > 2 else "2nd Front\nImage not available", 
-                                processed_images[3] if len(processed_images) > 3 else "2nd Back\nImage not available"]
-
-                    # ENHANCED image table styling (from your original)
-                    img_table = Table(img_data, 
-                                    colWidths=[IMG_WIDTH, IMG_WIDTH],
-                                    rowHeights=[0.4*inch, IMG_HEIGHT, 0.4*inch, IMG_HEIGHT])
-                    img_table.setStyle(TableStyle([
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (1,0), 12),  # Increased header font size
-                        ('FONTSIZE', (0,2), (1,2), 12),  # Increased header font size
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('LEFTPADDING', (0,0), (-1,-1), 6),    # Increased padding
-                        ('RIGHTPADDING', (0,0), (-1,-1), 6),   # Increased padding
-                        ('TOPPADDING', (0,0), (-1,-1), 6),     # Increased padding
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),  # Increased padding
-                        # Header background
-                        ('BACKGROUND', (0,0), (1,0), colors.lightgrey),
-                        ('BACKGROUND', (0,2), (1,2), colors.lightgrey),
-                    ]))
-                    elements.append(img_table)
-                    
-                    # Enhanced signature section (from your original)
-                    elements.append(Spacer(1, 0.3*inch))
-                    
-                    signature_table = Table([["", "Operator's Signature"]], colWidths=[5*inch, 2.5*inch])
-                    signature_table.setStyle(TableStyle([
-                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-                        ('FONTSIZE', (0,0), (-1,-1), 11),
-                        ('ALIGN', (1,0), (1,0), 'RIGHT'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('LEFTPADDING', (0,0), (-1,-1), 0),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 0),
-                        ('TOPPADDING', (0,0), (-1,-1), 0),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-                    ]))
-                    elements.append(signature_table)
-
-                # Build the PDF
-                self.logger.info(f"Building PDF document: {save_path}")
-                doc.build(elements)
-                self.logger.info("PDF document built successfully")
-                
-                # Verify PDF was created
-                if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
-                    self.logger.info(f"PDF created successfully: {save_path} ({os.path.getsize(save_path)} bytes)")
-                    return True
-                else:
-                    self.logger.error(f"PDF was not created or is empty: {save_path}")
-                    return False
-                    
-        except Exception as e:
-            error_str = str(e)
-            if "closed file" in error_str.lower() or "I/O operation" in error_str.lower():
-                self.logger.error(f"File I/O error creating PDF report: {e}")
-            else:
-                self.logger.error(f"Error creating PDF report: {e}")
-            import traceback
-            self.logger.error(f"PDF generation traceback: {traceback.format_exc()}")
-            return False
-
-    def create_image_object_in_memory(self, image_path, watermark_text, width=6.0*inch, height=4.5*inch):
-        """
-        ENHANCED: Create ReportLab Image object directly in memory with better quality
-        """
-        try:
-            # Validate input path
-            if not image_path or not os.path.exists(image_path):
-                self.safe_logger.warning(f"Image path does not exist: {image_path}")
-                return None
-            
-            self.safe_logger.debug(f"Processing image in memory: {image_path}")
-            
-            # Read image with OpenCV
-            img = cv2.imread(image_path)
-            if img is None:
-                self.safe_logger.warning(f"Could not read image: {image_path}")
-                return None
-            
-            # Get original dimensions
-            original_height, original_width = img.shape[:2]
-            
-            # Use high-quality dimensions
-            max_width = 1200   # High quality
-            max_height = 900   # High quality
-            
-            # Calculate scaling factor
-            scale_w = max_width / original_width
-            scale_h = max_height / original_height
-            scale = min(scale_w, scale_h)
-            
-            new_width = int(original_width * scale)
-            new_height = int(original_height * scale)
-            
-            # Use high-quality interpolation
-            img_resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
-            
-            # Add watermark if available
-            try:
-                from camera import add_watermark
-                watermarked_img = add_watermark(img_resized, watermark_text)
-                self.safe_logger.debug("Watermark added successfully")
-            except ImportError:
-                self.safe_logger.warning("Watermark function not available, using image without watermark")
-                watermarked_img = img_resized
-            except Exception as watermark_error:
-                self.safe_logger.warning(f"Watermark error: {watermark_error}, using image without watermark")
-                watermarked_img = img_resized
-            
-            # Convert OpenCV image (BGR) to PIL Image (RGB)
-            img_rgb = cv2.cvtColor(watermarked_img, cv2.COLOR_BGR2RGB)
-            pil_image = PILImage.fromarray(img_rgb)
-            
-            # Create BytesIO object to hold image data in memory
-            img_buffer = BytesIO()
-            # Use high quality (100% JPEG quality)
-            pil_image.save(img_buffer, format='JPEG', quality=100)
-            img_buffer.seek(0)  # Reset buffer position to beginning
-            
-            # Create ReportLab Image object from BytesIO buffer
-            rl_image = RLImage(img_buffer, width=width, height=height)
-            
-            self.safe_logger.debug(f"Successfully created in-memory image object for: {image_path}")
-            return rl_image
-            
-        except Exception as e:
-            self.safe_logger.error(f"Error creating in-memory image object: {e}")
-            import traceback
-            self.safe_logger.debug(f"Full traceback: {traceback.format_exc()}")
-            return None
-
 
     def shutdown(self):
         """Graceful shutdown of DataManager"""

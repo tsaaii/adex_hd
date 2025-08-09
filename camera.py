@@ -1367,18 +1367,40 @@ ContinuousCameraView = RobustCameraView  # Alias
 CameraView = RobustCameraView  # Alias
 
 # Enhanced watermark function (keeping your original structure)
-def add_watermark(image, text, ticket_id=None):
-    """Add a watermark to an image with sitename, vehicle number, timestamp, and image description in 2 lines at top, and ticket at bottom"""
+def add_watermark(image, text, ticket_id=None, size="large"):
+    """
+    Add a watermark to an image with configurable size
+    
+    Args:
+        image: OpenCV image
+        text: Watermark text
+        ticket_id: Optional ticket ID to include
+        size: "normal" (default) or "large" for PDF visibility
+    """
     result = image.copy()
     height, width = result.shape[:2]
     
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.5
-    color = (255, 255, 255)
-    thickness = 2
-    line_spacing = 8
     
+    # ENHANCED: Adjust font scale and thickness based on size parameter
+    if size == "large":
+        # Large size for PDF visibility
+        font_scale = max(1.5, width / 600)  # Much larger
+        thickness = max(4, int(width / 250))  # Much thicker
+        bg_alpha = 0.4  # More opaque background
+    else:
+        # Normal size for regular images
+        font_scale = 0.7
+        thickness = 2
+        bg_alpha = 0.3  # Less opaque background
+    
+    color = (255, 255, 255)  # White text
+    line_spacing = 8  # Space between lines
+    
+    # Add main watermark at TOP
     if text:
+        # Parse the text to extract components
+        # Expected format: "Site - Vehicle - Timestamp - Description"
         parts = [part.strip() for part in text.split(' - ')]
         
         if len(parts) >= 4:
@@ -1386,44 +1408,90 @@ def add_watermark(image, text, ticket_id=None):
             vehicle = parts[1] 
             timestamp = parts[2]
             description = parts[3]
+            
+            # Create the two lines for top watermark
+            line1 = f"{site} - {vehicle}"
+            line2 = f"{timestamp} - {description}"
         else:
-            # Handle cases with fewer parts
-            site = parts[0] if len(parts) > 0 else "Unknown Site"
-            vehicle = parts[1] if len(parts) > 1 else "Unknown Vehicle"
-            timestamp = parts[2] if len(parts) > 2 else "Unknown Time"
-            description = parts[3] if len(parts) > 3 else "Unknown Description"
+            # Fallback if format doesn't match
+            line1 = text[:len(text)//2] if len(text) > 30 else text
+            line2 = text[len(text)//2:] if len(text) > 30 else ""
         
-        line1 = f"{site} - {vehicle}"
-        line2 = f"{timestamp} - {description}"
-        
+        # Get text dimensions for both lines
         (line1_width, line1_height), line1_baseline = cv2.getTextSize(line1, font, font_scale, thickness)
         (line2_width, line2_height), line2_baseline = cv2.getTextSize(line2, font, font_scale, thickness)
         
-        total_text_height = line1_height + line2_height + line_spacing
-        max_text_width = max(line1_width, line2_width)
+        # Calculate total height needed for both lines
+        total_height = line1_height + line2_height + line_spacing + max(line1_baseline, line2_baseline)
         
-        overlay = result.copy()
-        overlay_y_start = 0
-        overlay_y_end = total_text_height + 20
-        cv2.rectangle(overlay, (0, overlay_y_start), (max_text_width + 20, overlay_y_end), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.6, result, 0.4, 0, result)
+        # Position at top with some padding
+        x1 = 10
+        y1 = line1_height + 10
+        x2 = 10  
+        y2 = y1 + line2_height + line_spacing
         
-        line1_y = line1_height + 10
-        cv2.putText(result, line1, (10, line1_y), font, font_scale, color, thickness)
+        # ENHANCED: Add semi-transparent background for better readability (size-dependent)
+        if size == "large":
+            # Larger background for large text
+            bg_padding = 15
+            bg_x1 = max(0, x1 - bg_padding)
+            bg_y1 = max(0, 10 - bg_padding)
+            bg_x2 = min(width, max(x1 + line1_width, x2 + line2_width) + bg_padding)
+            bg_y2 = min(height, y2 + line2_baseline + bg_padding)
+            
+            # Draw background
+            overlay = result.copy()
+            cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+            result = cv2.addWeighted(result, 1-bg_alpha, overlay, bg_alpha, 0)
+            
+            # Add white outline for better contrast (large text only)
+            outline_thickness = thickness + 2
+            cv2.putText(result, line1, (x1, y1), font, font_scale, (255, 255, 255), outline_thickness)
+            cv2.putText(result, line2, (x2, y2), font, font_scale, (255, 255, 255), outline_thickness)
         
-        line2_y = line1_height + line2_height + line_spacing + 10
-        cv2.putText(result, line2, (10, line2_y), font, font_scale, color, thickness)
+        # Add the main text lines
+        cv2.putText(result, line1, (x1, y1), font, font_scale, color, thickness)
+        if line2:  # Only add second line if it exists
+            cv2.putText(result, line2, (x2, y2), font, font_scale, color, thickness)
     
+    # Add ticket ID at BOTTOM (if provided)
     if ticket_id:
         ticket_text = f"Ticket: {ticket_id}"
-        (ticket_width, ticket_height), ticket_baseline = cv2.getTextSize(ticket_text, font, font_scale, thickness)
         
-        overlay_ticket = result.copy()
-        overlay_y_start = height - ticket_height - 20
-        overlay_y_end = height
-        cv2.rectangle(overlay_ticket, (0, overlay_y_start), (ticket_width + 20, overlay_y_end), (0, 0, 0), -1)
-        cv2.addWeighted(overlay_ticket, 0.6, result, 0.4, 0, result)
+        # Adjust font size for ticket based on size parameter
+        if size == "large":
+            ticket_font_scale = max(1.2, width / 800)
+            ticket_thickness = max(3, int(width / 300))
+        else:
+            ticket_font_scale = 1
+            ticket_thickness = 2
         
-        cv2.putText(result, ticket_text, (10, height - 10), font, font_scale, color, thickness)
+        # Get ticket text dimensions
+        (ticket_width, ticket_height), ticket_baseline = cv2.getTextSize(
+            ticket_text, font, ticket_font_scale, ticket_thickness)
+        
+        # Position at bottom-right
+        ticket_x = width - ticket_width - 10
+        ticket_y = height - 10
+        
+        # ENHANCED: Add background for ticket (size-dependent)
+        if size == "large":
+            # Larger background for large ticket text
+            bg_padding = 12
+            overlay = result.copy()
+            cv2.rectangle(overlay, 
+                         (ticket_x - bg_padding, ticket_y - ticket_height - bg_padding),
+                         (ticket_x + ticket_width + bg_padding, ticket_y + ticket_baseline + bg_padding),
+                         (0, 0, 0), -1)
+            result = cv2.addWeighted(result, 1-bg_alpha, overlay, bg_alpha, 0)
+            
+            # Add white outline for ticket text
+            outline_thickness = ticket_thickness + 2
+            cv2.putText(result, ticket_text, (ticket_x, ticket_y), font, 
+                       ticket_font_scale, (255, 255, 255), outline_thickness)
+        
+        # Add ticket text (yellow for visibility)
+        cv2.putText(result, ticket_text, (ticket_x, ticket_y), font, 
+                   ticket_font_scale, (0, 255, 255), ticket_thickness)
     
     return result

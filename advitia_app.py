@@ -964,7 +964,7 @@ class TharuniApp:
             
             # Handle the save result
             if isinstance(save_result, dict) and save_result.get('success', False):
-                safe_log("info", f"✅ Record {ticket_no} saved successfully")
+                safe_log("info", f" Record {ticket_no} saved successfully")
                 
                 # Extract weighment analysis from save result
                 is_complete_record = save_result.get('is_complete_record', False)
@@ -1025,10 +1025,10 @@ class TharuniApp:
                     print(f"🎫 TICKET FLOW DEBUG: INCREMENTING ticket counter after save of {ticket_no}")
                     commit_success = self.main_form.commit_current_ticket_number()
                     if commit_success:
-                        print(f"🎫 TICKET FLOW DEBUG: ✅ Ticket counter incremented from {ticket_no}")
+                        print(f"🎫 TICKET FLOW DEBUG:  Ticket counter incremented from {ticket_no}")
                         ticket_incremented = True
                     else:
-                        print(f"🎫 TICKET FLOW DEBUG: ❌ Failed to increment ticket counter")
+                        print(f"🎫 TICKET FLOW DEBUG:  Failed to increment ticket counter")
                         safe_log("warning", f"Failed to commit ticket number {ticket_no}")
                 else:
                     print(f"🎫 TICKET FLOW DEBUG: NOT incrementing counter - ticket {ticket_no} was already consumed")
@@ -1056,7 +1056,7 @@ class TharuniApp:
                     
                     # Show success message
                     safe_messagebox("showinfo", "First Weighment Saved", 
-                                f"✅ First weighment saved for ticket {ticket_no}!\n"
+                                f" First weighment saved for ticket {ticket_no}!\n"
                                 f"🚛 Vehicle added to pending queue\n"
                                 f"🎫 New ticket number: {new_ticket}\n\n"
                                 f"💡 Vehicle can return later for second weighment")
@@ -1081,13 +1081,13 @@ class TharuniApp:
                     if pdf_generated and pdf_path:
                         relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
                         safe_messagebox("showinfo", "Complete Record Saved + PDF Generated", 
-                                    f"✅ Complete weighment saved for ticket {ticket_no}!\n"
-                                    f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                    f" Complete weighment saved for ticket {ticket_no}!\n"
+                                    f" PDF generated: {os.path.basename(pdf_path)}\n"
                                     f"🎫 New ticket number: {new_ticket}\n\n"
                                     f"📂 PDF Location: {relative_folder}")
                     else:
                         safe_messagebox("showinfo", "Complete Record Saved", 
-                                    f"✅ Complete weighment saved for ticket {ticket_no}!\n"
+                                    f" Complete weighment saved for ticket {ticket_no}!\n"
                                     f"🎫 New ticket number: {new_ticket}")
                             
                 elif is_update and is_complete_record:
@@ -1118,13 +1118,13 @@ class TharuniApp:
                     if pdf_generated and pdf_path:
                         relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
                         safe_messagebox("showinfo", "Second Weighment Completed + PDF Generated", 
-                                    f"✅ Second weighment completed for ticket {ticket_no}!\n"
-                                    f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                    f" Second weighment completed for ticket {ticket_no}!\n"
+                                    f" PDF generated: {os.path.basename(pdf_path)}\n"
                                     f"🎫 Ready for next vehicle: {new_ticket}\n\n"
                                     f"📂 PDF Location: {relative_folder}")
                     else:
                         safe_messagebox("showinfo", "Second Weighment Completed", 
-                                    f"✅ Second weighment completed for ticket {ticket_no}!\n"
+                                    f" Second weighment completed for ticket {ticket_no}!\n"
                                     f"🎫 Ready for next vehicle: {new_ticket}")
                             
                 elif is_update and is_first_weighment_save:
@@ -1142,7 +1142,7 @@ class TharuniApp:
                         print(f"🎫 TICKET FLOW DEBUG: Keeping current ticket number: {new_ticket}")
                     
                     safe_messagebox("showinfo", "First Weighment Updated", 
-                                f"✅ First weighment updated for ticket {ticket_no}!\n"
+                                f" First weighment updated for ticket {ticket_no}!\n"
                                 f"🎫 Current ticket: {new_ticket}")
                 
                 else:
@@ -1159,7 +1159,7 @@ class TharuniApp:
                         print(f"🎫 TICKET FLOW DEBUG: Keeping current ticket number: {new_ticket}")
                     
                     safe_messagebox("showinfo", "Record Saved", 
-                                f"✅ Record saved for ticket {ticket_no}!\n"
+                                f" Record saved for ticket {ticket_no}!\n"
                                 f"🎫 Current ticket: {new_ticket}")
                 
                 # SAFE UI UPDATES: Always update the summary and pending vehicles list when saving
@@ -1176,8 +1176,8 @@ class TharuniApp:
             else:
                 # Handle error case
                 error_msg = save_result.get('error', 'Unknown error') if isinstance(save_result, dict) else 'Save operation failed'
-                print(f"🎫 TICKET FLOW DEBUG: ❌ Save failed: {error_msg}")
-                safe_log("error", f"❌ Failed to save record {ticket_no}: {error_msg}")
+                print(f"🎫 TICKET FLOW DEBUG:  Save failed: {error_msg}")
+                safe_log("error", f" Failed to save record {ticket_no}: {error_msg}")
                 
                 # SAFE ERROR DIALOG
                 try:
@@ -1189,12 +1189,12 @@ class TharuniApp:
                     print(f"[ERROR-DIALOG] Could not show error: {error_msg}")
                 
         except Exception as e:
-            print(f"🎫 TICKET FLOW DEBUG: ❌ Critical error in save_record: {e}")
+            print(f"🎫 TICKET FLOW DEBUG:  Critical error in save_record: {e}")
             
             # SAFE LOGGING for critical errors
             try:
                 if not getattr(self, '_shutting_down', False):
-                    self.logger.error(f"❌ Critical error in save_record: {e}")
+                    self.logger.error(f" Critical error in save_record: {e}")
                 else:
                     print(f"[CRITICAL-LOG-ERROR] Could not log critical error: {e}")
             except Exception:
@@ -1212,13 +1212,13 @@ class TharuniApp:
             print("🔄 DEBUG: Updating summary and pending vehicles after save")
             try:
                 self.update_summary()
-                print("✅ DEBUG: Summary updated successfully")
+                print(" DEBUG: Summary updated successfully")
             except Exception as summary_error:
                 print(f"⚠️ DEBUG: Error updating summary: {summary_error}")
                 
             try:
                 self.update_pending_vehicles()
-                print("✅ DEBUG: Pending vehicles updated successfully")
+                print(" DEBUG: Pending vehicles updated successfully")
             except Exception as pending_error:
                 print(f"⚠️ DEBUG: Error updating pending vehicles: {pending_error}")
 
@@ -1332,7 +1332,7 @@ class TharuniApp:
             print(f"🔍 DEBUG: Loading pending vehicle with ticket_no: '{ticket_no}'")
             
             if not hasattr(self, 'data_manager') or not self.data_manager:
-                print(f"❌ DEBUG: No data manager available for loading ticket {ticket_no}")
+                print(f" DEBUG: No data manager available for loading ticket {ticket_no}")
                 return False
             
             # REMOVED: Don't use safe_csv_operation here - it interferes with later save operations
@@ -1350,7 +1350,7 @@ class TharuniApp:
                 print(f"🔍 DEBUG: Comparing '{found_ticket_no}' with '{ticket_no}'")
                 
                 if found_ticket_no == ticket_no:
-                    print(f"✅ DEBUG: Found matching ticket!")
+                    print(f" DEBUG: Found matching ticket!")
                     first_weight = record.get('first_weight', '').strip()
                     first_timestamp = record.get('first_timestamp', '').strip()
                     second_weight = record.get('second_weight', '').strip()
@@ -1367,11 +1367,11 @@ class TharuniApp:
                     
                     elif first_weight and first_timestamp:
                         # Load pending record for second weighment
-                        print(f"✅ DEBUG: Loading pending ticket {ticket_no} for second weighment")
+                        print(f" DEBUG: Loading pending ticket {ticket_no} for second weighment")
                         
                         # Load the record data into the main form
                         if hasattr(self, 'main_form') and self.main_form:
-                            print(f"✅ DEBUG: Main form found, loading record data")
+                            print(f" DEBUG: Main form found, loading record data")
                             self.main_form.load_record_data(record)
                             
                             # Set the form state for second weighment
@@ -1380,10 +1380,10 @@ class TharuniApp:
                             
                             # Switch to the main form tab (tab index 0)
                             if hasattr(self, 'notebook') and self.notebook:
-                                print(f"✅ DEBUG: Switching to main form tab")
+                                print(f" DEBUG: Switching to main form tab")
                                 self.notebook.select(0)
                             
-                            print(f"✅ DEBUG: Successfully loaded pending ticket {ticket_no}")
+                            print(f" DEBUG: Successfully loaded pending ticket {ticket_no}")
                             
                             # Show success message
                             messagebox.showinfo("Pending Record Loaded", 
@@ -1394,7 +1394,7 @@ class TharuniApp:
                             
                             return True
                         else:
-                            print("❌ DEBUG: Main form not available")
+                            print(" DEBUG: Main form not available")
                             messagebox.showerror("System Error", "Main form not available")
                             return False
                     
@@ -1406,14 +1406,14 @@ class TharuniApp:
                         return False
             
             # Ticket not found
-            print(f"❌ DEBUG: Ticket {ticket_no} not found in {len(records)} records")
+            print(f" DEBUG: Ticket {ticket_no} not found in {len(records)} records")
             messagebox.showerror("Ticket Not Found", 
                             f"Ticket {ticket_no} not found in records.\n"
                             f"Searched through {len(records)} records.")
             return False
             
         except Exception as e:
-            print(f"❌ DEBUG: Error loading pending vehicle {ticket_no}: {e}")
+            print(f" DEBUG: Error loading pending vehicle {ticket_no}: {e}")
             import traceback
             traceback.print_exc()
             messagebox.showerror("Loading Error", 
@@ -1657,11 +1657,11 @@ class TharuniApp:
             print("🔄 DEBUG: Calling summary panel update...")
             if hasattr(self, 'summary_panel') and self.summary_panel:
                 self.summary_panel.update_summary()
-                print("✅ DEBUG: Summary panel updated successfully")
+                print(" DEBUG: Summary panel updated successfully")
             else:
                 print("⚠️ DEBUG: No summary panel available")
         except Exception as e:
-            print(f"❌ DEBUG: Error updating summary: {e}")
+            print(f" DEBUG: Error updating summary: {e}")
             self.logger.error(f"Error updating summary: {e}")
 
     def view_records(self):

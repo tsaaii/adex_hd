@@ -31,7 +31,7 @@ class CloudStorageService:
             try:
                 # Try to list blobs (limited to 1) to test permissions
                 next(self.bucket.list_blobs(max_results=1), None)
-                print(f"✅ Successfully connected to GCS bucket: {bucket_name}")
+                print(f" Successfully connected to GCS bucket: {bucket_name}")
             except Forbidden as e:
                 print(f"❌ Permission error: {e}")
                 print(f"Make sure the service account has 'Storage Object Admin' role for bucket {bucket_name}")
@@ -40,7 +40,7 @@ class CloudStorageService:
                 # Bucket doesn't exist, try to create it
                 try:
                     self.bucket = self.client.create_bucket(bucket_name)
-                    print(f"✅ Created new bucket: {bucket_name}")
+                    print(f" Created new bucket: {bucket_name}")
                 except Exception as create_err:
                     print(f"❌ Cannot create bucket: {create_err}")
                     self.bucket = None
@@ -303,7 +303,7 @@ class CloudStorageService:
                         }
                         
                         files_uploaded += 1
-                        print(f"   ✅ Uploaded: {rel_path}")
+                        print(f"    Uploaded: {rel_path}")
                         
                     except Exception as e:
                         error_msg = f"Error uploading {file}: {str(e)}"
@@ -397,7 +397,7 @@ class CloudStorageService:
                         }
                         
                         files_uploaded += 1
-                        print(f"   ✅ Uploaded: {rel_path}")
+                        print(f"    Uploaded: {rel_path}")
                         
                     except Exception as e:
                         error_msg = f"Error uploading {file}: {str(e)}"
@@ -504,7 +504,7 @@ class CloudStorageService:
                         }
                         
                         files_uploaded += 1
-                        print(f"   ✅ Uploaded: {rel_path}")
+                        print(f"    Uploaded: {rel_path}")
                         
                     except Exception as e:
                         error_msg = f"Error uploading {file}: {str(e)}"
@@ -706,7 +706,7 @@ class CloudStorageService:
         print(f"📊 Reports: {results['reports']['uploaded']}/{results['reports']['total']}")
         
         if results["success"]:
-            print(f"✅ SUCCESS! All files backed up to cloud")
+            print(f" SUCCESS! All files backed up to cloud")
         else:
             print(f"⚠️  PARTIAL SUCCESS - {len(results['all_errors'])} errors occurred")
             for error in results["all_errors"][:3]:  # Show first 3 errors
@@ -895,7 +895,7 @@ class CloudStorageService:
         print(f"📊 Reports: {results['reports']['uploaded']}/{results['reports']['total']}")
         
         if results["success"]:
-            print(f"✅ SUCCESS! All today's files backed up successfully")
+            print(f" SUCCESS! All today's files backed up successfully")
         else:
             print(f"⚠️  PARTIAL SUCCESS - {len(results['all_errors'])} errors occurred")
             for error in results["all_errors"][:3]:  # Show first 3 errors
@@ -1001,7 +1001,7 @@ class CloudStorageService:
                             }
                             
                             files_uploaded += 1
-                            print(f"   ✅ Uploaded: {file}")
+                            print(f"    Uploaded: {file}")
                             
                         except Exception as e:
                             error_msg = f"Error uploading {file}: {str(e)}"
@@ -1110,7 +1110,7 @@ class CloudStorageService:
                             }
                             
                             files_uploaded += 1
-                            print(f"   ✅ Uploaded: {file}")
+                            print(f"    Uploaded: {file}")
                             
                         except Exception as e:
                             error_msg = f"Error uploading {file}: {str(e)}"
@@ -1206,7 +1206,7 @@ class CloudStorageService:
                             }
                             
                             files_uploaded += 1
-                            print(f"   ✅ Uploaded: {file}")
+                            print(f"    Uploaded: {file}")
                             
                         except Exception as e:
                             error_msg = f"Error uploading {file}: {str(e)}"
@@ -1676,7 +1676,7 @@ class CloudStorageService:
             
             blob.upload_from_filename(local_file_path, content_type=content_type)
             
-            print(f"✅ Uploaded: {local_file_path} → {cloud_path}")
+            print(f" Uploaded: {local_file_path} → {cloud_path}")
             return True
             
         except Exception as e:
@@ -1705,7 +1705,7 @@ class CloudStorageService:
             blob = self.bucket.blob(cloud_path)
             blob.download_to_filename(local_path)
             
-            print(f"✅ Downloaded: {cloud_path} → {local_path}")
+            print(f" Downloaded: {cloud_path} → {local_path}")
             return True
             
         except Exception as e:
@@ -1759,7 +1759,7 @@ class CloudStorageService:
                     
                     if self.upload_image(local_image_path, descriptive_name, agency_name, site_name):
                         images_uploaded += 1
-                        print(f"✅ Uploaded {image_type} image: {image_filename}")
+                        print(f" Uploaded {image_type} image: {image_filename}")
                     else:
                         print(f"❌ Failed to upload {image_type} image: {image_filename}")
                 else:
@@ -1837,7 +1837,7 @@ class CloudStorageService:
             tracking_data["last_backup_date"] = datetime.datetime.now().isoformat()
             self.save_backup_tracking_data(tracking_data)
             
-            print(f"✅ Saved JSON record as {cloud_path}")
+            print(f" Saved JSON record as {cloud_path}")
             return True
             
         except Exception as e:
@@ -1914,7 +1914,7 @@ class CloudStorageService:
             tracking_data["images_backed_up"] = images_tracking
             self.save_backup_tracking_data(tracking_data)
             
-            print(f"✅ Uploaded image {local_image_path} to {cloud_path}")
+            print(f" Uploaded image {local_image_path} to {cloud_path}")
             return True
             
         except Exception as e:
@@ -1940,7 +1940,7 @@ class CloudStorageService:
                 # Test bucket access
                 next(self.bucket.list_blobs(max_results=1), None)
                 status["bucket_accessible"] = True
-                status["status_message"] = "✅ Connected and ready for backup"
+                status["status_message"] = " Connected and ready for backup"
             except Exception as e:
                 status["error"] = str(e)
                 status["status_message"] = f"❌ Connection error: {e}"
@@ -1980,7 +1980,7 @@ def example_backup_usage():
     print("")
     print("# Check results")
     print("if results['success']:")
-    print("    print(f'✅ Backup successful! {results[\"total_files_uploaded\"]} files uploaded')")
+    print("    print(f' Backup successful! {results[\"total_files_uploaded\"]} files uploaded')")
     print("else:")
     print("    print(f'❌ Backup had {len(results[\"all_errors\"])} errors')")
     print("")

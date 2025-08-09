@@ -9,6 +9,7 @@ import config
 import tkcalendar
 import numpy as np  # Add this line to your imports
 
+from trip_report_generator import generate_trip_report, is_record_complete
 
 # Try to import optional dependencies
 try:
@@ -803,7 +804,7 @@ class ReportGenerator:
             messagebox.showerror("Export Error", f"Failed to export to Excel:\n{str(e)}")
     
     def export_selected_to_pdf(self):
-        """FIXED: Always export to PDF summary format regardless of filters applied"""
+        """Export selected records to PDF - use trip report generator for single records"""
         if not REPORTLAB_AVAILABLE:
             messagebox.showerror("PDF Export Error", 
                             "ReportLab library is not installed.\n"
@@ -817,38 +818,63 @@ class ReportGenerator:
             return
         
         try:
-            # ALWAYS use summary format for advanced reports (FIXED LOGIC)
             if len(selected_data) == 1:
-                # Single record - use individual format
-                filename = self.generate_filename(selected_data, "pdf")
-                save_path = os.path.join(self.reports_folder, filename)
+                # Single record - use new trip report generator
+                record = selected_data[0]
                 
-                self.create_pdf_report(selected_data, save_path)
-                messagebox.showinfo("Export Successful", 
-                                f"Individual PDF report saved successfully!\n\n"
-                                f"File: {filename}\n"
-                                f"Location: {self.reports_folder}")
+                # Check if record is complete
+                if not is_record_complete(record):
+                    messagebox.showwarning("Incomplete Record", 
+                                        "Selected record is incomplete (missing weighments).\n"
+                                        "Trip reports can only be generated for complete records.")
+                    return
+                
+                # Generate trip report using new module
+                success, pdf_path = generate_trip_report(record)
+                
+                if success:
+                    filename = os.path.basename(pdf_path)
+                    messagebox.showinfo("Export Successful", 
+                                    f"Trip Report generated successfully!\n\n"
+                                    f"File: {filename}\n"
+                                    f"Location: {os.path.dirname(pdf_path)}")
+                else:
+                    messagebox.showerror("Export Error", "Failed to generate trip report.")
             else:
-                # Multiple records - ALWAYS use summary format
+                # Multiple records - use summary format
                 filename = self.generate_filtered_filename(selected_data, "pdf")
                 save_path = os.path.join(self.reports_folder, filename)
                 
-                print(f"📄 EXPORT DEBUG: Creating summary PDF for {len(selected_data)} records with applied filters")
+                print(f"📄 EXPORT DEBUG: Creating summary PDF for {len(selected_data)} records")
+                
+                # Count material types for user info
+                materials = set()
+                for record in selected_data:
+                    material = (
+                        record.get('material', '') or 
+                        record.get('material', '') or 
+                        'Unknown'
+                    ).strip() or 'Unknown'
+                    materials.add(material)
+                
                 self.create_summary_pdf_report(selected_data, save_path)
                 
                 messagebox.showinfo("Export Successful", 
                                 f"Summary PDF Report saved successfully!\n\n"
                                 f"File: {filename}\n"
                                 f"Records: {len(selected_data)}\n"
+                                f"Material Types: {len(materials)} ({', '.join(sorted(materials))})\n"
+                                f"Features: Material grouping, weight breakdown, separate tables\n"
                                 f"Location: {self.reports_folder}")
             
-            # FIXED: Only close window if it exists
+            # Close window if it exists
             if hasattr(self, 'report_window') and self.report_window:
                 self.report_window.destroy()
             
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export to PDF:\n{str(e)}")
-
+            import traceback
+            print(f"PDF export error: {traceback.format_exc()}")
 
 
     def generate_filtered_filename(self, selected_data, extension="pdf"):
@@ -2168,7 +2194,7 @@ def export_to_excel(filename=None, data_manager=None):
         return False
 
 def export_to_pdf(filename=None, data_manager=None):
-    """Export records to PDF - now saves to reports folder with proper naming"""
+    """Export records to PDF - now uses trip report generator for individual records"""
     if not data_manager:
         messagebox.showerror("Error", "Data manager not available")
         return False
@@ -2176,19 +2202,25 @@ def export_to_pdf(filename=None, data_manager=None):
     try:
         generator = ReportGenerator(None, data_manager)  # None parent for legacy usage
         
-        # Auto-select all records for quick export
-        generator.all_records = data_manager.get_all_records()
-        if not generator.all_records:
-            messagebox.showwarning("No Records", "No records found to export.")
+        # Get all complete records
+        all_records = data_manager.get_all_records()
+        complete_records = [record for record in all_records if is_record_complete(record)]
+        
+        if not complete_records:
+            messagebox.showwarning("No Complete Records", 
+                                 "No complete records found to export.\n"
+                                 "Trip reports require both weighments to be completed.")
             return False
-            
-        generator.selected_records = [record.get('ticket_no', '') for record in generator.all_records if record.get('ticket_no', '')]
+        
+        # For legacy function, auto-select all complete records
+        generator.all_records = complete_records
+        generator.selected_records = [record.get('ticket_no', '') for record in complete_records if record.get('ticket_no', '')]
         
         if generator.selected_records:
             generator.export_selected_to_pdf()
             return True
         else:
-            messagebox.showwarning("No Valid Records", "No valid records with ticket numbers found to export.")
+            messagebox.showwarning("No Valid Records", "No valid complete records with ticket numbers found to export.")
             return False
             
     except Exception as e:

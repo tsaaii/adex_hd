@@ -190,8 +190,8 @@ class ImageHandler:
             print(f"Error updating image status: {e}")
     
     def save_front_image(self, captured_image=None):
-        """FIXED: Save front view camera image with corrected pending vehicle check"""
-        print("=== CORRECTED FRONT IMAGE SAVE ===")
+        """UPDATED: Save front view camera image with NEW ticket-based naming"""
+        print("=== SAVE FRONT IMAGE (UPDATED FOR NEW NAMING) ===")
         print(f"Captured image provided: {captured_image is not None}")
         
         # Validate vehicle number first
@@ -199,14 +199,14 @@ class ImageHandler:
             print("Vehicle number validation failed")
             return False
         
-        # CORRECTED: Check vehicle status with proper logic
+        # Check vehicle status with proper logic
         if not self.check_vehicle_for_image_save():
             print("❌ FRONT IMAGE SAVE BLOCKED - Vehicle check failed")
             return False
 
-        print(" Vehicle check passed - proceeding with front image save")
+        print("✅ Vehicle check passed - proceeding with front image save")
         
-        # Rest of the existing save_front_image code...
+        # Determine which weighment this image is for
         image_weighment = self.determine_current_image_weighment()
         weighment_label = "1st" if image_weighment == "first" else "2nd"
         print(f"Saving {weighment_label} weighment front image")
@@ -229,17 +229,22 @@ class ImageHandler:
         print(f"Image shape: {image.shape}")
         
         try:
-            # Generate filename with new format
+            # NEW: Generate filename using ticket number and position codes
+            ticket_id = self.main_form.rst_var.get().strip()
+            
+            # Determine suffix based on weighment
+            if image_weighment == "first":
+                suffix = "ff"  # First Front
+            else:
+                suffix = "sf"  # Second Front
+            
+            filename = f"{ticket_id}_{suffix}.jpg"
+            print(f"Generated NEW filename: {filename}")
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # New naming format: {site}_{vehicle}_{timestamp}_{weighment}_front.jpg
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_{weighment_label}_front.jpg"
-            print(f"Generated filename: {filename}")
-            
-            # Main watermark text
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - {weighment_label.upper()} FRONT"
             
             # Add watermark with ticket ID
@@ -271,7 +276,7 @@ class ImageHandler:
             file_size = os.path.getsize(filepath)
             print(f"File created successfully, size: {file_size} bytes")
             
-            # Update the appropriate image path based on weighment determination
+            # Update the appropriate image path based on weighment
             if image_weighment == "first":
                 self.main_form.first_front_image_path = filepath
                 print(f"Set first_front_image_path: {filepath}")
@@ -282,7 +287,7 @@ class ImageHandler:
             # Update status
             self.update_image_status()
             
-            print(f" {weighment_label} weighment front image saved successfully: {filename}")
+            print(f"✅ {weighment_label} weighment front image saved successfully: {filename}")
             
             # Show success message
             messagebox.showinfo("Success", f"{weighment_label} weighment front image saved successfully!")
@@ -296,10 +301,10 @@ class ImageHandler:
             traceback.print_exc()
             messagebox.showerror("Error", error_msg)
             return False
-    
+
     def save_back_image(self, captured_image=None):
-        """FIXED: Save back view camera image with corrected pending vehicle check"""
-        print("=== CORRECTED BACK IMAGE SAVE ===")
+        """UPDATED: Save back view camera image with NEW ticket-based naming"""
+        print("=== SAVE BACK IMAGE (UPDATED FOR NEW NAMING) ===")
         print(f"Captured image provided: {captured_image is not None}")
         
         # Validate vehicle number first
@@ -307,14 +312,14 @@ class ImageHandler:
             print("Vehicle number validation failed")
             return False
         
-        # CORRECTED: Check vehicle status with proper logic
+        # Check vehicle status with proper logic
         if not self.check_vehicle_for_image_save():
             print("❌ BACK IMAGE SAVE BLOCKED - Vehicle check failed")
             return False
 
-        print(" Vehicle check passed - proceeding with back image save")
+        print("✅ Vehicle check passed - proceeding with back image save")
         
-        # Rest of the existing save_back_image code...
+        # Determine which weighment this image is for
         image_weighment = self.determine_current_image_weighment()
         weighment_label = "1st" if image_weighment == "first" else "2nd"
         print(f"Saving {weighment_label} weighment back image")
@@ -337,17 +342,22 @@ class ImageHandler:
         print(f"Image shape: {image.shape}")
         
         try:
-            # Generate filename with new format
+            # NEW: Generate filename using ticket number and position codes
+            ticket_id = self.main_form.rst_var.get().strip()
+            
+            # Determine suffix based on weighment
+            if image_weighment == "first":
+                suffix = "fb"  # First Back
+            else:
+                suffix = "sb"  # Second Back
+            
+            filename = f"{ticket_id}_{suffix}.jpg"
+            print(f"Generated NEW filename: {filename}")
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # New naming format: {site}_{vehicle}_{timestamp}_{weighment}_back.jpg
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_{weighment_label}_back.jpg"
-            print(f"Generated filename: {filename}")
-            
-            # Main watermark text
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - {weighment_label.upper()} BACK"
             
             # Add watermark with ticket ID
@@ -379,7 +389,7 @@ class ImageHandler:
             file_size = os.path.getsize(filepath)
             print(f"File created successfully, size: {file_size} bytes")
             
-            # Update the appropriate image path based on weighment determination
+            # Update the appropriate image path based on weighment
             if image_weighment == "first":
                 self.main_form.first_back_image_path = filepath
                 print(f"Set first_back_image_path: {filepath}")
@@ -390,7 +400,7 @@ class ImageHandler:
             # Update status
             self.update_image_status()
             
-            print(f" {weighment_label} weighment back image saved successfully: {filename}")
+            print(f"✅ {weighment_label} weighment back image saved successfully: {filename}")
             
             # Show success message
             messagebox.showinfo("Success", f"{weighment_label} weighment back image saved successfully!")
@@ -406,7 +416,7 @@ class ImageHandler:
             return False
     
     def save_first_front_image(self, captured_image):
-        """Save image specifically for first weighment front - used by continuous camera system"""
+        """Save image specifically for first weighment front - NEW naming convention"""
         print("=== SAVE FIRST FRONT IMAGE (SPECIFIC) ===")
         
         # Validate vehicle number first
@@ -419,13 +429,14 @@ class ImageHandler:
             return False
         
         try:
-            # Generate filename
+            # NEW: Generate filename using ticket number + ff
+            ticket_id = self.main_form.rst_var.get().strip()
+            filename = f"{ticket_id}_ff.jpg"
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_1st_front.jpg"
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - 1ST FRONT"
             
             # Add watermark
@@ -439,7 +450,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.first_front_image_path = filepath
                 self.update_image_status()
-                print(f" First front image saved: {filename}")
+                print(f"✅ First front image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save first front image")
@@ -448,9 +459,10 @@ class ImageHandler:
         except Exception as e:
             print(f"Error saving first front image: {e}")
             return False
+
     
     def save_first_back_image(self, captured_image):
-        """Save image specifically for first weighment back - used by continuous camera system"""
+        """Save image specifically for first weighment back - NEW naming convention"""
         print("=== SAVE FIRST BACK IMAGE (SPECIFIC) ===")
         
         # Validate vehicle number first
@@ -463,13 +475,14 @@ class ImageHandler:
             return False
         
         try:
-            # Generate filename
+            # NEW: Generate filename using ticket number + fb
+            ticket_id = self.main_form.rst_var.get().strip()
+            filename = f"{ticket_id}_fb.jpg"
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_1st_back.jpg"
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - 1ST BACK"
             
             # Add watermark
@@ -483,7 +496,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.first_back_image_path = filepath
                 self.update_image_status()
-                print(f" First back image saved: {filename}")
+                print(f"✅ First back image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save first back image")
@@ -493,8 +506,10 @@ class ImageHandler:
             print(f"Error saving first back image: {e}")
             return False
     
+
+    
     def save_second_front_image(self, captured_image):
-        """Save image specifically for second weighment front - used by continuous camera system"""
+        """Save image specifically for second weighment front - NEW naming convention"""
         print("=== SAVE SECOND FRONT IMAGE (SPECIFIC) ===")
         
         # Validate vehicle number first
@@ -507,13 +522,14 @@ class ImageHandler:
             return False
         
         try:
-            # Generate filename
+            # NEW: Generate filename using ticket number + sf
+            ticket_id = self.main_form.rst_var.get().strip()
+            filename = f"{ticket_id}_sf.jpg"
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_2nd_front.jpg"
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - 2ND FRONT"
             
             # Add watermark
@@ -527,7 +543,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.second_front_image_path = filepath
                 self.update_image_status()
-                print(f" Second front image saved: {filename}")
+                print(f"✅ Second front image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save second front image")
@@ -536,9 +552,9 @@ class ImageHandler:
         except Exception as e:
             print(f"Error saving second front image: {e}")
             return False
-    
+
     def save_second_back_image(self, captured_image):
-        """Save image specifically for second weighment back - used by continuous camera system"""
+        """Save image specifically for second weighment back - NEW naming convention"""
         print("=== SAVE SECOND BACK IMAGE (SPECIFIC) ===")
         
         # Validate vehicle number first
@@ -551,13 +567,14 @@ class ImageHandler:
             return False
         
         try:
-            # Generate filename
+            # NEW: Generate filename using ticket number + sb
+            ticket_id = self.main_form.rst_var.get().strip()
+            filename = f"{ticket_id}_sb.jpg"
+            
+            # Keep detailed watermark for identification
             site_name = self.main_form.site_var.get().replace(" ", "_")
             vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
-            ticket_id = self.main_form.rst_var.get().strip()
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            filename = f"{site_name}_{vehicle_no}_{timestamp}_2nd_back.jpg"
             watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - 2ND BACK"
             
             # Add watermark
@@ -571,7 +588,7 @@ class ImageHandler:
             if success and os.path.exists(filepath):
                 self.main_form.second_back_image_path = filepath
                 self.update_image_status()
-                print(f" Second back image saved: {filename}")
+                print(f"✅ Second back image saved: {filename}")
                 return True
             else:
                 print("ERROR: Failed to save second back image")
@@ -580,7 +597,121 @@ class ImageHandler:
         except Exception as e:
             print(f"Error saving second back image: {e}")
             return False
-    
+
+
+    def save_image(self, weighment_label="1st"):
+        """Save captured image with NEW ticket-based naming convention"""
+        if not self.main_form.camera_view.camera:
+            print("ERROR: Camera not initialized")
+            messagebox.showerror("Error", "Camera not initialized")
+            return False
+        
+        # Get current frame
+        image = self.main_form.camera_view.get_current_frame()
+        if image is None:
+            print("ERROR: No image captured")
+            messagebox.showerror("Error", "No image available. Please ensure camera is active and capture a frame first.")
+            return False
+        
+        print(f"Image shape: {image.shape}")
+        
+        try:
+            # NEW: Generate filename using ticket number and position codes
+            ticket_id = self.main_form.rst_var.get().strip()
+            
+            # Determine image weighment automatically
+            image_weighment = self.determine_current_image_weighment()
+            
+            # Determine if this is front or back (you'll need to add logic for this)
+            # For now, assuming this method is called with the appropriate weighment_label
+            
+            # Map weighment and position to suffix
+            suffix_map = {
+                ("first", "front"): "ff",
+                ("first", "back"): "fb", 
+                ("second", "front"): "sf",
+                ("second", "back"): "sb"
+            }
+            
+            # Extract position from weighment_label (assumes format like "1st_front" or "2nd_back")
+            if "front" in weighment_label.lower():
+                position = "front"
+            elif "back" in weighment_label.lower():
+                position = "back"
+            else:
+                position = "front"  # Default
+            
+            suffix = suffix_map.get((image_weighment, position), "unknown")
+            filename = f"{ticket_id}_{suffix}.jpg"
+            
+            print(f"Generated filename: {filename}")
+            
+            # Keep detailed watermark for identification
+            site_name = self.main_form.site_var.get().replace(" ", "_")
+            vehicle_no = self.main_form.vehicle_var.get().replace(" ", "_")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            watermark_text = f"{site_name} - {vehicle_no} - {timestamp} - {weighment_label.upper()}"
+            
+            # Add watermark with ticket ID
+            print("Adding watermark...")
+            watermarked_image = add_watermark(image, watermark_text, ticket_id)
+            
+            # Ensure images folder exists
+            os.makedirs(config.IMAGES_FOLDER, exist_ok=True)
+            
+            # Save file path
+            filepath = os.path.join(config.IMAGES_FOLDER, filename)
+            print(f"Saving to: {filepath}")
+            
+            # Save the image
+            success = cv2.imwrite(filepath, watermarked_image)
+            print(f"cv2.imwrite returned: {success}")
+            
+            if not success:
+                print("ERROR: cv2.imwrite failed")
+                messagebox.showerror("Error", "Failed to save image file")
+                return False
+            
+            # Verify file was created
+            if not os.path.exists(filepath):
+                print("ERROR: File was not created")
+                messagebox.showerror("Error", "Image file was not created")
+                return False
+            
+            file_size = os.path.getsize(filepath)
+            print(f"File created successfully, size: {file_size} bytes")
+            
+            # Update the appropriate image path based on suffix
+            if suffix == "ff":
+                self.main_form.first_front_image_path = filepath
+                print(f"Set first_front_image_path: {filepath}")
+            elif suffix == "fb":
+                self.main_form.first_back_image_path = filepath
+                print(f"Set first_back_image_path: {filepath}")
+            elif suffix == "sf":
+                self.main_form.second_front_image_path = filepath
+                print(f"Set second_front_image_path: {filepath}")
+            elif suffix == "sb":
+                self.main_form.second_back_image_path = filepath
+                print(f"Set second_back_image_path: {filepath}")
+            
+            # Update status
+            self.update_image_status()
+            
+            print(f"✅ {weighment_label} image saved successfully: {filename}")
+            
+            # Show success message
+            messagebox.showinfo("Success", f"{weighment_label} image saved successfully!")
+            
+            return True
+            
+        except Exception as e:
+            print(f"ERROR saving image: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Error", f"Failed to save image: {str(e)}")
+            return False
+
     def get_all_image_filenames(self):
         """Get all image filenames for database storage
         
