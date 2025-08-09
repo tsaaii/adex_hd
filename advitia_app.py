@@ -107,7 +107,7 @@ class TharuniApp:
         self.root.title("Swaccha Andhra Corporation powered by Advitia Labs")
         self.root.geometry("900x580")
         self.root.minsize(900, 580)
-
+        self._shutting_down = False
         # FIXED: Setup unified logging with better error handling
         try:
             unified_logger = setup_unified_logging("combined", "logs")  # FIXED: typo "coimbined" -> "combined"
@@ -887,15 +887,43 @@ class TharuniApp:
             self.logger.error(f"Error in confirm_exit: {e}")
             self.on_closing()
 
+
     def save_record(self):
-        """FIXED: Save current record - smart ticket increment logic"""
+        """FIXED: Save current record - smart ticket increment logic with I/O protection"""
         try:
-            self.logger.info("="*50)
-            self.logger.info("SAVE RECORD OPERATION STARTED WITH SMART TICKET FLOW")
+            # ADD: Check shutdown status before proceeding
+            if getattr(self, '_shutting_down', False):
+                print("🛑 SAVE BLOCKED: Application is shutting down")
+                try:
+                    messagebox.showwarning("Operation Blocked", 
+                                        "Cannot save during application shutdown.\n"
+                                        "Please wait for shutdown to complete.")
+                except:
+                    print("Cannot save during shutdown - messagebox failed")
+                return
+            
+            # SAFE LOGGING: Use safe logging wrapper to prevent I/O errors
+            def safe_log(level, message):
+                """Safe logging that handles closed files"""
+                try:
+                    if not getattr(self, '_shutting_down', False):
+                        getattr(self.logger, level)(message)
+                    else:
+                        print(f"[{level.upper()}] {message}")
+                except (ValueError, OSError, AttributeError) as e:
+                    if "closed file" in str(e).lower():
+                        print(f"[{level.upper()}] {message}")
+                    else:
+                        print(f"[LOG-ERROR] {e}")
+                except Exception:
+                    print(f"[{level.upper()}] {message}")
+            
+            safe_log("info", "="*50)
+            safe_log("info", "SAVE RECORD OPERATION STARTED WITH SMART TICKET FLOW")
             
             # Validate form first
             if not self.main_form.validate_form():
-                self.logger.warning("Form validation failed - aborting save")
+                safe_log("warning", "Form validation failed - aborting save")
                 return
             
             # Get form data
@@ -903,7 +931,7 @@ class TharuniApp:
             ticket_no = record_data.get('ticket_no', '')
             
             print(f"🎫 TICKET FLOW DEBUG: Starting save for ticket: {ticket_no}")
-            self.logger.info(f"Saving record for ticket: {ticket_no}")
+            safe_log("info", f"Saving record for ticket: {ticket_no}")
             
             # Check if this is a new ticket or updating existing pending ticket
             is_update = False
@@ -917,28 +945,39 @@ class TharuniApp:
                         is_update = True
                         existing_record = record
                         print(f"🎫 TICKET FLOW DEBUG: This is an UPDATE to existing ticket: {ticket_no}")
-                        self.logger.info(f"Updating existing record: {ticket_no}")
+                        safe_log("info", f"Updating existing record: {ticket_no}")
                         break
             
             if not is_update:
                 print(f"🎫 TICKET FLOW DEBUG: This is a NEW record: {ticket_no}")
-                self.logger.info(f"Adding new record: {ticket_no}")
+                safe_log("info", f"Adding new record: {ticket_no}")
+            
+            # ADD: Check shutdown again before data operations
+            if getattr(self, '_shutting_down', False):
+                print("🛑 SAVE BLOCKED: Application shutdown detected during save operation")
+                return
             
             # Save to database
-            self.logger.info(f"Calling data_manager.save_record for {ticket_no}")
+            safe_log("info", f"Calling data_manager.save_record for {ticket_no}")
             save_result = self.data_manager.save_record(record_data)
             
             # Handle the save result
             if isinstance(save_result, dict) and save_result.get('success', False):
-                self.logger.info(f" Record {ticket_no} saved successfully")
+                safe_log("info", f"✅ Record {ticket_no} saved successfully")
                 
                 # Extract weighment analysis from save result
                 is_complete_record = save_result.get('is_complete_record', False)
                 is_first_weighment_save = save_result.get('is_first_weighment_save', False)
                 pdf_generated = save_result.get('pdf_generated', False)
                 pdf_path = save_result.get('pdf_path', '')
-                if CONNECTIVITY_AVAILABLE:
-                    add_to_queue_if_available(self, record_data, pdf_path)
+                
+                # SAFE CONNECTIVITY: Wrap in try-catch to prevent I/O errors
+                try:
+                    if CONNECTIVITY_AVAILABLE:
+                        add_to_queue_if_available(self, record_data, pdf_path)
+                except Exception as conn_error:
+                    print(f"🌐 CONNECTIVITY WARNING: {conn_error}")
+                
                 todays_reports_folder = save_result.get('todays_reports_folder', '')
                 
                 print(f"🎫 TICKET FLOW DEBUG: Save result analysis:")
@@ -985,15 +1024,26 @@ class TharuniApp:
                     print(f"🎫 TICKET FLOW DEBUG: INCREMENTING ticket counter after save of {ticket_no}")
                     commit_success = self.main_form.commit_current_ticket_number()
                     if commit_success:
-                        print(f"🎫 TICKET FLOW DEBUG:  Ticket counter incremented from {ticket_no}")
+                        print(f"🎫 TICKET FLOW DEBUG: ✅ Ticket counter incremented from {ticket_no}")
                         ticket_incremented = True
                     else:
-                        print(f"🎫 TICKET FLOW DEBUG:  Failed to increment ticket counter")
-                        self.logger.warning(f"Failed to commit ticket number {ticket_no}")
+                        print(f"🎫 TICKET FLOW DEBUG: ❌ Failed to increment ticket counter")
+                        safe_log("warning", f"Failed to commit ticket number {ticket_no}")
                 else:
                     print(f"🎫 TICKET FLOW DEBUG: NOT incrementing counter - ticket {ticket_no} was already consumed")
                 
                 # Handle different scenarios for UI updates and user feedback
+                # SAFE MESSAGEBOX: Wrap all messagebox calls to prevent I/O errors during shutdown
+                def safe_messagebox(msg_type, title, message):
+                    """Safe messagebox wrapper"""
+                    try:
+                        if not getattr(self, '_shutting_down', False):
+                            getattr(messagebox, msg_type)(title, message)
+                        else:
+                            print(f"[MESSAGEBOX-{title}] {message}")
+                    except Exception as msg_error:
+                        print(f"[MESSAGEBOX-ERROR] {title}: {message} (Error: {msg_error})")
+                
                 if is_first_weighment_save and not is_update:
                     # NEW first-only weighment record
                     print(f"🎫 TICKET FLOW DEBUG: First weighment saved for NEW ticket {ticket_no}")
@@ -1004,15 +1054,12 @@ class TharuniApp:
                     print(f"🎫 TICKET FLOW DEBUG: Generated next ticket number: {new_ticket}")
                     
                     # Show success message
-                    try:
-                        messagebox.showinfo("First Weighment Saved", 
-                                        f" First weighment saved for ticket {ticket_no}!\n"
-                                        f"🚛 Vehicle added to pending queue\n"
-                                        f"🎫 New ticket number: {new_ticket}\n\n"
-                                        f" Vehicle can return later for second weighment")
-                    except Exception as msg_error:
-                        self.logger.warning(f"Could not show messagebox: {msg_error}")
-                        
+                    safe_messagebox("showinfo", "First Weighment Saved", 
+                                f"✅ First weighment saved for ticket {ticket_no}!\n"
+                                f"🚛 Vehicle added to pending queue\n"
+                                f"🎫 New ticket number: {new_ticket}\n\n"
+                                f"💡 Vehicle can return later for second weighment")
+                            
                 elif is_complete_record and not is_update:
                     # NEW complete record (both weighments at once)
                     print(f"🎫 TICKET FLOW DEBUG: Complete record saved for NEW ticket {ticket_no}")
@@ -1022,58 +1069,63 @@ class TharuniApp:
                     new_ticket = self.main_form.rst_var.get()
                     print(f"🎫 TICKET FLOW DEBUG: Generated next ticket number: {new_ticket}")
                     
-                    # Switch to summary tab
-                    self.notebook.select(1)
+                    # SAFE UI UPDATE: Wrap in try-catch
+                    try:
+                        if not getattr(self, '_shutting_down', False):
+                            self.notebook.select(1)
+                    except Exception as ui_error:
+                        print(f"[UI-ERROR] Could not switch tab: {ui_error}")
                     
                     # Show completion message
-                    try:
-                        if pdf_generated and pdf_path:
-                            relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
-                            messagebox.showinfo("Complete Record Saved + PDF Generated", 
-                                            f" Complete weighment saved for ticket {ticket_no}!\n"
-                                            f" PDF generated: {os.path.basename(pdf_path)}\n"
-                                            f"🎫 New ticket number: {new_ticket}\n\n"
-                                            f"PDF Location: {relative_folder}")
-                        else:
-                            messagebox.showinfo("Complete Record Saved", 
-                                            f" Complete weighment saved for ticket {ticket_no}!\n"
-                                            f"🎫 New ticket number: {new_ticket}")
-                    except Exception as msg_error:
-                        self.logger.warning(f"Could not show messagebox: {msg_error}")
-                        
+                    if pdf_generated and pdf_path:
+                        relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
+                        safe_messagebox("showinfo", "Complete Record Saved + PDF Generated", 
+                                    f"✅ Complete weighment saved for ticket {ticket_no}!\n"
+                                    f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                    f"🎫 New ticket number: {new_ticket}\n\n"
+                                    f"📂 PDF Location: {relative_folder}")
+                    else:
+                        safe_messagebox("showinfo", "Complete Record Saved", 
+                                    f"✅ Complete weighment saved for ticket {ticket_no}!\n"
+                                    f"🎫 New ticket number: {new_ticket}")
+                            
                 elif is_update and is_complete_record:
                     # UPDATE: Completing second weighment for existing pending record
                     print(f"🎫 TICKET FLOW DEBUG: Second weighment completed for existing ticket {ticket_no}")
                     
                     # Remove from pending vehicles list AFTER successful save
-                    self.logger.info(f"Removing {ticket_no} from pending vehicles list")
-                    if hasattr(self, 'pending_vehicles'):
-                        self.pending_vehicles.remove_saved_record(ticket_no)
+                    safe_log("info", f"Removing {ticket_no} from pending vehicles list")
+                    try:
+                        if hasattr(self, 'pending_vehicles'):
+                            self.pending_vehicles.remove_saved_record(ticket_no)
+                    except Exception as pending_error:
+                        print(f"[PENDING-ERROR] Could not remove from pending list: {pending_error}")
                     
                     # Generate new ticket for next vehicle (always show next available ticket)
                     self.main_form.prepare_for_new_ticket_after_completion()
                     new_ticket = self.main_form.rst_var.get()
                     print(f"🎫 TICKET FLOW DEBUG: Generated next ticket number after completing {ticket_no}: {new_ticket}")
                     
-                    # Switch to summary tab
-                    self.notebook.select(1)
+                    # SAFE UI UPDATE: Wrap in try-catch
+                    try:
+                        if not getattr(self, '_shutting_down', False):
+                            self.notebook.select(1)
+                    except Exception as ui_error:
+                        print(f"[UI-ERROR] Could not switch tab: {ui_error}")
                     
                     # Show completion message
-                    try:
-                        if pdf_generated and pdf_path:
-                            relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
-                            messagebox.showinfo("Second Weighment Completed + PDF Generated", 
-                                            f" Second weighment completed for ticket {ticket_no}!\n"
-                                            f" PDF generated: {os.path.basename(pdf_path)}\n"
-                                            f"🎫 Ready for next vehicle: {new_ticket}\n\n"
-                                            f"PDF Location: {relative_folder}")
-                        else:
-                            messagebox.showinfo("Second Weighment Completed", 
-                                            f" Second weighment completed for ticket {ticket_no}!\n"
-                                            f"🎫 Ready for next vehicle: {new_ticket}")
-                    except Exception as msg_error:
-                        self.logger.warning(f"Could not show messagebox: {msg_error}")
-                        
+                    if pdf_generated and pdf_path:
+                        relative_folder = os.path.relpath(todays_reports_folder, os.getcwd()) if todays_reports_folder else "reports"
+                        safe_messagebox("showinfo", "Second Weighment Completed + PDF Generated", 
+                                    f"✅ Second weighment completed for ticket {ticket_no}!\n"
+                                    f"✅ PDF generated: {os.path.basename(pdf_path)}\n"
+                                    f"🎫 Ready for next vehicle: {new_ticket}\n\n"
+                                    f"📂 PDF Location: {relative_folder}")
+                    else:
+                        safe_messagebox("showinfo", "Second Weighment Completed", 
+                                    f"✅ Second weighment completed for ticket {ticket_no}!\n"
+                                    f"🎫 Ready for next vehicle: {new_ticket}")
+                            
                 elif is_update and is_first_weighment_save:
                     # UPDATE: Adding first weighment to existing record
                     print(f"🎫 TICKET FLOW DEBUG: First weighment added to existing ticket {ticket_no}")
@@ -1088,12 +1140,9 @@ class TharuniApp:
                         new_ticket = self.main_form.rst_var.get()
                         print(f"🎫 TICKET FLOW DEBUG: Keeping current ticket number: {new_ticket}")
                     
-                    try:
-                        messagebox.showinfo("First Weighment Updated", 
-                                        f" First weighment updated for ticket {ticket_no}!\n"
-                                        f"🎫 Current ticket: {new_ticket}")
-                    except Exception as msg_error:
-                        self.logger.warning(f"Could not show messagebox: {msg_error}")
+                    safe_messagebox("showinfo", "First Weighment Updated", 
+                                f"✅ First weighment updated for ticket {ticket_no}!\n"
+                                f"🎫 Current ticket: {new_ticket}")
                 
                 else:
                     # Catch-all: Any other successful save
@@ -1108,34 +1157,66 @@ class TharuniApp:
                         new_ticket = self.main_form.rst_var.get()
                         print(f"🎫 TICKET FLOW DEBUG: Keeping current ticket number: {new_ticket}")
                     
-                    try:
-                        messagebox.showinfo("Record Saved", 
-                                        f" Record saved for ticket {ticket_no}!\n"
-                                        f"🎫 Current ticket: {new_ticket}")
-                    except Exception as msg_error:
-                        self.logger.warning(f"Could not show messagebox: {msg_error}")
+                    safe_messagebox("showinfo", "Record Saved", 
+                                f"✅ Record saved for ticket {ticket_no}!\n"
+                                f"🎫 Current ticket: {new_ticket}")
                 
-                # Always update the summary and pending vehicles list when saving
-                self.update_summary()
-                self.update_pending_vehicles()
+                # SAFE UI UPDATES: Always update the summary and pending vehicles list when saving
+                try:
+                    if not getattr(self, '_shutting_down', False):
+                        self.update_summary()
+                        self.update_pending_vehicles()
+                except Exception as update_error:
+                    print(f"[UI-UPDATE-ERROR] Could not update UI components: {update_error}")
                 
                 print(f"🎫 TICKET FLOW DEBUG: Save operation completed successfully")
-                self.logger.info("SAVE RECORD OPERATION COMPLETED SUCCESSFULLY WITH SMART TICKET FLOW")
+                safe_log("info", "SAVE RECORD OPERATION COMPLETED SUCCESSFULLY WITH SMART TICKET FLOW")
                 
             else:
                 # Handle error case
                 error_msg = save_result.get('error', 'Unknown error') if isinstance(save_result, dict) else 'Save operation failed'
-                print(f"🎫 TICKET FLOW DEBUG:  Save failed: {error_msg}")
-                self.logger.error(f" Failed to save record {ticket_no}: {error_msg}")
-                messagebox.showerror("Error", f"Failed to save record: {error_msg}")
+                print(f"🎫 TICKET FLOW DEBUG: ❌ Save failed: {error_msg}")
+                safe_log("error", f"❌ Failed to save record {ticket_no}: {error_msg}")
+                
+                # SAFE ERROR DIALOG
+                try:
+                    if not getattr(self, '_shutting_down', False):
+                        messagebox.showerror("Error", f"Failed to save record: {error_msg}")
+                    else:
+                        print(f"[ERROR-DIALOG] Failed to save record: {error_msg}")
+                except Exception as msg_error:
+                    print(f"[ERROR-DIALOG] Could not show error: {error_msg}")
                 
         except Exception as e:
-            print(f"🎫 TICKET FLOW DEBUG:  Critical error in save_record: {e}")
-            self.logger.error(f" Critical error in save_record: {e}")
-            messagebox.showerror("Save Error", f"Critical error saving record:\n{str(e)}\n\nCheck logs for details.")
+            print(f"🎫 TICKET FLOW DEBUG: ❌ Critical error in save_record: {e}")
+            
+            # SAFE LOGGING for critical errors
+            try:
+                if not getattr(self, '_shutting_down', False):
+                    self.logger.error(f"❌ Critical error in save_record: {e}")
+                else:
+                    print(f"[CRITICAL-LOG-ERROR] Could not log critical error: {e}")
+            except Exception:
+                print(f"[CRITICAL-LOG-ERROR] Could not log critical error: {e}")
+            
+            # SAFE ERROR DIALOG
+            try:
+                if not getattr(self, '_shutting_down', False):
+                    messagebox.showerror("Save Error", f"Critical error saving record:\n{str(e)}\n\nCheck logs for details.")
+                else:
+                    print(f"[CRITICAL-ERROR-DIALOG] Critical error in save_record: {e}")
+            except Exception:
+                print(f"[CRITICAL-ERROR-DIALOG] Critical error in save_record: {e}")
         finally:
             print("🎫 TICKET FLOW DEBUG: " + "="*50)
-            self.logger.info("="*50)
+            # SAFE FINAL LOGGING
+            try:
+                if not getattr(self, '_shutting_down', False):
+                    self.logger.info("="*50)
+                else:
+                    print("[FINAL-LOG] Save record operation completed")
+            except Exception:
+                print("[FINAL-LOG] Save record operation completed")
 
     def prepare_for_next_vehicle_after_first_weighment(self):
         """Prepare form for next vehicle AFTER first weighment is saved and ticket is committed"""

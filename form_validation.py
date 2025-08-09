@@ -2,7 +2,7 @@ from tkinter import messagebox
 import logging
 
 class FormValidator:
-    """FIXED: Handles form validation logic with correct pending vehicle validation"""
+    """FIXED: Handles form validation logic with correct pending vehicle validation and robust logging"""
     
     def __init__(self, main_form):
         """Initialize form validator
@@ -11,13 +11,81 @@ class FormValidator:
             main_form: Reference to the main form instance
         """
         self.main_form = main_form
-        self.logger = logging.getLogger('FormValidator')
-        self.logger.info("FormValidator initialized")
+        
+        # Setup robust logger
+        self._setup_robust_logger()
+        
+        self._safe_log("info", "FormValidator initialized")
+    
+    def _setup_robust_logger(self):
+        """Setup robust logger that handles closed file issues"""
+        try:
+            import logging
+            self.logger = logging.getLogger('FormValidator')
+            
+            # Remove any existing handlers to prevent conflicts
+            for handler in self.logger.handlers[:]:
+                try:
+                    handler.close()
+                except:
+                    pass
+                self.logger.removeHandler(handler)
+            
+            # Only add a handler if none exist or if parent doesn't have handlers
+            if not self.logger.handlers and not self.logger.parent.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                handler.setFormatter(formatter)
+                self.logger.addHandler(handler)
+                self.logger.setLevel(logging.INFO)
+            
+            # Test the logger
+            self.logger.info("FormValidator logger setup completed")
+                
+        except Exception as e:
+            # Fallback logger that can't fail
+            class SafeLogger:
+                def info(self, msg): 
+                    try:
+                        print(f"FormValidator INFO: {msg}")
+                    except:
+                        pass
+                def warning(self, msg): 
+                    try:
+                        print(f"FormValidator WARNING: {msg}")
+                    except:
+                        pass
+                def error(self, msg): 
+                    try:
+                        print(f"FormValidator ERROR: {msg}")
+                    except:
+                        pass
+                def debug(self, msg): 
+                    try:
+                        print(f"FormValidator DEBUG: {msg}")
+                    except:
+                        pass
+            
+            self.logger = SafeLogger()
+            print(f"FormValidator using fallback logger due to: {e}")
+
+    def _safe_log(self, level, message):
+        """Safe logging method that won't fail on closed files"""
+        try:
+            if hasattr(self, 'logger'):
+                getattr(self.logger, level)(message)
+        except Exception as e:
+            # If logging fails, fall back to print
+            try:
+                print(f"FormValidator {level.upper()}: {message}")
+                print(f"(Logging failed: {e})")
+            except:
+                pass  # Even print failed, just continue
     
     def validate_basic_fields(self):
         """Validate that basic required fields are filled"""
         try:
-            self.logger.info("Validating basic fields")
+            self._safe_log("info", "Validating basic fields")
             
             # Get field values and strip whitespace
             ticket_no = self.main_form.rst_var.get().strip()
@@ -25,7 +93,7 @@ class FormValidator:
             agency_name = self.main_form.agency_var.get().strip()
             material_type = self.main_form.material_type_var.get().strip()
             
-            self.logger.info(f"Field values: ticket='{ticket_no}', vehicle='{vehicle_no}', agency='{agency_name}', material_type='{material_type}'")
+            self._safe_log("info", f"Field values: ticket='{ticket_no}', vehicle='{vehicle_no}', agency='{agency_name}', material_type='{material_type}'")
             
             required_fields = {
                 "Ticket No": ticket_no,
@@ -38,40 +106,40 @@ class FormValidator:
             
             if missing_fields:
                 error_msg = f"Please fill in the following required fields: {', '.join(missing_fields)}"
-                self.logger.error(f"Basic validation failed: {error_msg}")
+                self._safe_log("error", f"Basic validation failed: {error_msg}")
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
-            self.logger.info("Basic validation passed")
+            self._safe_log("info", "Basic validation passed")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error in basic validation: {e}")
+            self._safe_log("error", f"Error in basic validation: {e}")
             return False
     
     def validate_weighment_data(self):
         """Validate weighment data consistency"""
         try:
-            self.logger.info("Validating weighment data")
+            self._safe_log("info", "Validating weighment data")
             
             first_weight = self.main_form.first_weight_var.get().strip()
             first_timestamp = self.main_form.first_timestamp_var.get().strip()
             second_weight = self.main_form.second_weight_var.get().strip()
             second_timestamp = self.main_form.second_timestamp_var.get().strip()
             
-            self.logger.info(f"Weighment data: first_weight='{first_weight}', first_timestamp='{first_timestamp}', "
+            self._safe_log("info", f"Weighment data: first_weight='{first_weight}', first_timestamp='{first_timestamp}', "
                         f"second_weight='{second_weight}', second_timestamp='{second_timestamp}'")
             
             # Check for consistent weighment data
             if first_weight and not first_timestamp:
                 error_msg = "First weighment timestamp is missing"
-                self.logger.error(error_msg)
+                self._safe_log("error", error_msg)
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
             if second_weight and not second_timestamp:
                 error_msg = "Second weighment timestamp is missing"
-                self.logger.error(error_msg)
+                self._safe_log("error", error_msg)
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
@@ -83,21 +151,21 @@ class FormValidator:
                         weight_manager = self.main_form.weight_manager
                         if hasattr(weight_manager, 'is_test_mode_enabled') and weight_manager.is_test_mode_enabled():
                             # In test mode, we can generate weight on demand
-                            self.logger.info("Test mode enabled - weight can be generated on capture")
+                            self._safe_log("info", "Test mode enabled - weight can be generated on capture")
                             return True
                 except:
                     pass
                     
                 error_msg = "Please capture first weighment before saving"
-                self.logger.error(error_msg)
+                self._safe_log("error", error_msg)
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
-            self.logger.info("Weighment validation passed")
+            self._safe_log("info", "Weighment validation passed")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error in weighment validation: {e}")
+            self._safe_log("error", f"Error in weighment validation: {e}")
             return False
 
     def find_main_app(self):
@@ -107,7 +175,7 @@ class FormValidator:
             if hasattr(self.main_form, 'find_main_app'):
                 app = self.main_form.find_main_app()
                 if app:
-                    self.logger.info("Found main app via main_form.find_main_app()")
+                    self._safe_log("info", "Found main app via main_form.find_main_app()")
                     return app
             
             # Alternative method: Check if main_form has data_manager directly
@@ -117,7 +185,7 @@ class FormValidator:
                     def __init__(self, data_manager):
                         self.data_manager = data_manager
                 
-                self.logger.info("Using data_manager from main_form directly")
+                self._safe_log("info", "Using data_manager from main_form directly")
                 return MockApp(self.main_form.data_manager)
             
             # Try to traverse up the widget hierarchy
@@ -130,14 +198,14 @@ class FormValidator:
                 
                 # Check for main app indicators
                 if hasattr(widget, 'data_manager') and widget.data_manager:
-                    self.logger.info(f"Found main app with data_manager at level {attempts}")
+                    self._safe_log("info", f"Found main app with data_manager at level {attempts}")
                     return widget
                 
                 # Check class name for app identification
                 if hasattr(widget, '__class__'):
                     class_name = widget.__class__.__name__
                     if 'App' in class_name and hasattr(widget, 'data_manager'):
-                        self.logger.info(f"Found app class with data_manager: {class_name}")
+                        self._safe_log("info", f"Found app class with data_manager: {class_name}")
                         return widget
                 
                 # Try different parent references
@@ -157,11 +225,11 @@ class FormValidator:
                 else:
                     break
             
-            self.logger.warning(f"Could not find main app after {attempts} attempts")
+            self._safe_log("warning", f"Could not find main app after {attempts} attempts")
             return None
             
         except Exception as e:
-            self.logger.error(f"Error finding main app: {e}")
+            self._safe_log("error", f"Error finding main app: {e}")
             return None
 
     def validate_vehicle_not_in_pending_for_new_weighment(self, operation_type="save"):
@@ -184,16 +252,16 @@ class FormValidator:
             
             # If this is a SECOND weighment, ALWAYS allow it (even if vehicle was pending)
             if current_weighment == "second":
-                self.logger.info(f"ALLOWING {operation_type} - This is a SECOND weighment for vehicle {vehicle_no}")
+                self._safe_log("info", f"ALLOWING {operation_type} - This is a SECOND weighment for vehicle {vehicle_no}")
                 return True
             
             # Only check pending status for FIRST weighments
-            self.logger.info(f"STRICT CHECK: Checking if vehicle {vehicle_no} is already pending (for FIRST weighment)")
+            self._safe_log("info", f"STRICT CHECK: Checking if vehicle {vehicle_no} is already pending (for FIRST weighment)")
             
             # Get the main app to access data manager
             app = self.find_main_app()
             if not app or not hasattr(app, 'data_manager') or not app.data_manager:
-                self.logger.error("CRITICAL: Cannot access data manager - this means we cannot verify vehicle status")
+                self._safe_log("error", "CRITICAL: Cannot access data manager - this means we cannot verify vehicle status")
                 
                 # Show a user-friendly error message
                 error_msg = (f"🔧 System Configuration Issue\n\n"
@@ -211,9 +279,9 @@ class FormValidator:
             # Get all records and check for pending vehicles
             try:
                 records = app.data_manager.get_all_records()
-                self.logger.info(f"Successfully retrieved {len(records)} records for validation")
+                self._safe_log("info", f"Successfully retrieved {len(records)} records for validation")
             except Exception as e:
-                self.logger.error(f"Failed to get records from data manager: {e}")
+                self._safe_log("error", f"Failed to get records from data manager: {e}")
                 messagebox.showerror("Database Error", 
                                    f"Cannot access vehicle records to verify status.\n"
                                    f"Error: {str(e)}\n\n"
@@ -242,20 +310,20 @@ class FormValidator:
                                    f"⚖️ First Weight: {first_weight} kg\n"
                                    f"🕐 First Time: {first_timestamp}\n\n"
                                    f"❌ You CANNOT create a new record for this vehicle.\n"
-                                   f" You MUST complete the SECOND weighment first.\n\n"
-                                   f" Click on Pending Vehicles panel → Select ticket {pending_ticket} → Complete second weighment")
+                                   f"✅ You MUST complete the SECOND weighment first.\n\n"
+                                   f"💡 Click on Pending Vehicles panel → Select ticket {pending_ticket} → Complete second weighment")
                         
-                        self.logger.error(f"BLOCKED: Vehicle {vehicle_no} already in pending list with ticket {pending_ticket}")
+                        self._safe_log("error", f"BLOCKED: Vehicle {vehicle_no} already in pending list with ticket {pending_ticket}")
                         
                         # Show BLOCKING error message
                         messagebox.showerror("Vehicle Already Pending - Operation Blocked", error_msg)
                         return False  # STRICT BLOCK
             
-            self.logger.info(f"Vehicle {vehicle_no} not in pending list - NEW first weighment operation allowed")
+            self._safe_log("info", f"Vehicle {vehicle_no} not in pending list - NEW first weighment operation allowed")
             return True
             
         except Exception as e:
-            self.logger.error(f"CRITICAL ERROR checking pending vehicles: {e}")
+            self._safe_log("error", f"CRITICAL ERROR checking pending vehicles: {e}")
             # STRICT: If there's an error, BLOCK the operation for safety
             messagebox.showerror("System Error", 
                                f"Critical error checking vehicle status.\n"
@@ -267,7 +335,7 @@ class FormValidator:
     def validate_form(self):
         """ENHANCED: Validate all form fields before saving - FIXED pending logic"""
         try:
-            self.logger.info("Starting comprehensive form validation")
+            self._safe_log("info", "Starting comprehensive form validation")
             
             # Step 1: Validate basic required fields
             if not self.validate_basic_fields():
@@ -281,7 +349,7 @@ class FormValidator:
                     return False
             else:
                 # For second weighments, allow even if vehicle was pending
-                self.logger.info("SECOND weighment - skipping pending check (this is correct)")
+                self._safe_log("info", "SECOND weighment - skipping pending check (this is correct)")
             
             # Step 3: Validate weighment data
             if not self.validate_weighment_data():
@@ -294,23 +362,23 @@ class FormValidator:
                                         "No images have been captured for this weighment. "
                                         "Continue without images?")
                 if not result:
-                    self.logger.info("User chose not to continue without images")
+                    self._safe_log("info", "User chose not to continue without images")
                     return False
                 else:
-                    self.logger.info("User chose to continue without images")
+                    self._safe_log("info", "User chose to continue without images")
             
-            self.logger.info("Form validation passed successfully")
+            self._safe_log("info", "Form validation passed successfully")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error in form validation: {e}")
+            self._safe_log("error", f"Error in form validation: {e}")
             return False
     
     def validate_images(self):
         """Validate that at least one image is captured for current weighment"""
         try:
             current_weighment = self.main_form.current_weighment
-            self.logger.info(f"Validating images for {current_weighment} weighment")
+            self._safe_log("info", f"Validating images for {current_weighment} weighment")
             
             if current_weighment == "first":
                 # Check first weighment images
@@ -322,12 +390,12 @@ class FormValidator:
                 back_image = self.main_form.second_back_image_path
             
             has_images = bool(front_image or back_image)
-            self.logger.info(f"Images validation for {current_weighment}: front={bool(front_image)}, back={bool(back_image)}")
+            self._safe_log("info", f"Images validation for {current_weighment}: front={bool(front_image)}, back={bool(back_image)}")
             
             return has_images
             
         except Exception as e:
-            self.logger.error(f"Error validating images: {e}")
+            self._safe_log("error", f"Error validating images: {e}")
             return False
     
     def validate_vehicle_number(self):
@@ -337,15 +405,15 @@ class FormValidator:
             
             if not vehicle_no:
                 error_msg = "Please enter a vehicle number before capturing images."
-                self.logger.error(f"Vehicle validation failed: {error_msg}")
+                self._safe_log("error", f"Vehicle validation failed: {error_msg}")
                 messagebox.showerror("Error", error_msg)
                 return False
             
-            self.logger.info(f"Vehicle validation passed: {vehicle_no}")
+            self._safe_log("info", f"Vehicle validation passed: {vehicle_no}")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error validating vehicle number: {e}")
+            self._safe_log("error", f"Error validating vehicle number: {e}")
             return False
     
     def validate_numeric_field(self, value, field_name):
@@ -358,13 +426,13 @@ class FormValidator:
             
             if float_value < 0:
                 error_msg = f"{field_name} cannot be negative"
-                self.logger.error(error_msg)
+                self._safe_log("error", error_msg)
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
             if float_value > 999999:  # Reasonable upper limit
                 error_msg = f"{field_name} value seems too large"
-                self.logger.error(error_msg)
+                self._safe_log("error", error_msg)
                 messagebox.showerror("Validation Error", error_msg)
                 return False
             
@@ -372,9 +440,14 @@ class FormValidator:
             
         except ValueError:
             error_msg = f"{field_name} must be a valid number"
-            self.logger.error(error_msg)
+            self._safe_log("error", error_msg)
             messagebox.showerror("Validation Error", error_msg)
             return False
         except Exception as e:
-            self.logger.error(f"Error validating numeric field {field_name}: {e}")
+            self._safe_log("error", f"Error validating numeric field {field_name}: {e}")
             return False
+
+    # Additional validation methods for vehicle pending checks
+    def validate_vehicle_not_in_pending(self):
+        """Check if vehicle is not already in pending list (wrapper for backward compatibility)"""
+        return self.validate_vehicle_not_in_pending_for_new_weighment("general")

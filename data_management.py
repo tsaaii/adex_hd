@@ -72,7 +72,7 @@ class DataManager:
         # Set up logging first
         self.logger = setup_logging()
         self.logger.info("DataManager initialized with OFFLINE-FIRST approach + JSON local storage")
-        
+        self.is_shutting_down = False
         self.data_file = config.DATA_FILE
         self.reports_folder = config.REPORTS_FOLDER
         self.pdf_reports_folder = config.REPORTS_FOLDER
@@ -118,26 +118,47 @@ class DataManager:
         self.logger.info("Cloud storage will only be initialized when backup is requested")
 
     def save_record(self, data):
-        """FIXED: Save record with deterministic archive checking"""
+        """RESTORED: Save record using your proven working logic + I/O error protection"""
         try:
-            self.logger.info("="*50)
-            self.logger.info("STARTING OFFLINE-FIRST RECORD SAVE")
-            self.logger.info(f"Input data keys: {list(data.keys())}")
+            # ADD: Shutdown protection (new safety feature)
+            if getattr(self, 'is_shutting_down', False):
+                print("🛑 DATA MANAGER: Save blocked - shutdown in progress")
+                return {'success': False, 'error': 'Application shutting down'}
             
-            # FIXED: Calculate and set net weight properly
-            data = self.calculate_and_set_net_weight(data)
+            # SAFE LOGGING: Use safe logging wrapper to prevent I/O errors
+            def safe_log(level, message):
+                """Safe logging that handles closed files"""
+                try:
+                    if not getattr(self, 'is_shutting_down', False):
+                        getattr(self.logger, level)(message)
+                    else:
+                        print(f"[{level.upper()}] {message}")
+                except (ValueError, OSError, AttributeError) as e:
+                    if "closed file" in str(e).lower():
+                        print(f"[{level.upper()}] {message}")
+                    else:
+                        print(f"[LOG-ERROR] {e}")
+                except Exception:
+                    print(f"[{level.upper()}] {message}")
             
-            # Enhanced validation with detailed logging
+            safe_log("info", "="*50)
+            safe_log("info", "STARTING OFFLINE-FIRST RECORD SAVE")
+            safe_log("info", f"Input data keys: {list(data.keys())}")
+            
+            # RESTORED: Use your original validation method name
             validation_result = self.validate_record_data(data)
             if not validation_result['valid']:
-                self.logger.error(f"Validation failed: {validation_result['errors']}")
-                if messagebox:
+                safe_log("error", f"Validation failed: {validation_result['errors']}")
+                if messagebox and not getattr(self, 'is_shutting_down', False):
                     messagebox.showerror("Validation Error", f"Record validation failed:\n" + "\n".join(validation_result['errors']))
                 return {'success': False, 'error': 'Validation failed'}
             
+            # FIXED: Calculate and set net weight properly (your original logic)
+            data = self.calculate_and_set_net_weight(data)
+            
             # Use the current data file
             current_file = self.get_current_data_file()
-            self.logger.info(f"Using data file: {current_file}")
+            safe_log("info", f"Using data file: {current_file}")
             
             # Check if this is an update to an existing record
             ticket_no = data.get('ticket_no', '')
@@ -149,33 +170,38 @@ class DataManager:
                 for record in records:
                     if record.get('ticket_no') == ticket_no:
                         is_update = True
-                        self.logger.info(f"Updating existing record: {ticket_no}")
+                        safe_log("info", f"Updating existing record: {ticket_no}")
                         break
             
             if not is_update:
-                self.logger.info(f"Adding new record: {ticket_no}")
+                safe_log("info", f"Adding new record: {ticket_no}")
             
-            # PRIORITY 1: Save to CSV locally (this MUST work)
+            # PRIORITY 1: Save to CSV locally (this MUST work) - RESTORED your working logic
             csv_success = False
             try:
+                # Check shutdown again before CSV operations
+                if getattr(self, 'is_shutting_down', False):
+                    print("🛑 DATA MANAGER: Save blocked before CSV write - shutdown in progress")
+                    return {'success': False, 'error': 'Application shutting down before CSV write'}
+                
                 if is_update:
                     csv_success = self.update_record(data)
                 else:
                     csv_success = self.add_new_record(data)
                 
                 if csv_success:
-                    self.logger.info(f" Record {ticket_no} saved to local CSV successfully")
+                    safe_log("info", f"✅ Record {ticket_no} saved to local CSV successfully")
                 else:
-                    self.logger.error(f" Failed to save record {ticket_no} to local CSV")
+                    safe_log("error", f"❌ Failed to save record {ticket_no} to local CSV")
                     return {'success': False, 'error': 'Failed to save to CSV'}
             except Exception as csv_error:
-                self.logger.error(f" Critical error saving to CSV: {csv_error}")
+                safe_log("error", f"❌ Critical error saving to CSV: {csv_error}")
                 return {'success': False, 'error': f'CSV error: {str(csv_error)}'}
             
-            # Check if this is a complete record (both weighments)
+            # Check if this is a complete record (both weighments) - RESTORED
             is_complete_record = self.is_record_complete(data)
             
-            # Analyze weighment state for logging
+            # Analyze weighment state for logging - RESTORED your original logic
             first_weight = data.get('first_weight', '').strip()
             first_timestamp = data.get('first_timestamp', '').strip()
             second_weight = data.get('second_weight', '').strip()
@@ -185,66 +211,66 @@ class DataManager:
             has_second_weighment = bool(second_weight and second_timestamp)
             is_first_weighment_save = has_first_weighment and not has_second_weighment
             
-            self.logger.info(f"Weighment analysis:")
-            self.logger.info(f"  - Has first weighment: {has_first_weighment}")
-            self.logger.info(f"  - Has second weighment: {has_second_weighment}")
-            self.logger.info(f"  - Is first weighment save: {is_first_weighment_save}")
-            self.logger.info(f"  - Is complete record: {is_complete_record}")
-            self.logger.info(f"  - Is update: {is_update}")
+            safe_log("info", f"Weighment analysis:")
+            safe_log("info", f"  - Has first weighment: {has_first_weighment}")
+            safe_log("info", f"  - Has second weighment: {has_second_weighment}")
+            safe_log("info", f"  - Is first weighment save: {is_first_weighment_save}")
+            safe_log("info", f"  - Is complete record: {is_complete_record}")
+            safe_log("info", f"  - Is update: {is_update}")
             
-            # PRIORITY 2: Save complete records as JSON locally
+            # PRIORITY 2: Save complete records as JSON locally - RESTORED
             json_saved = False
             if is_complete_record:
-                self.logger.info(f"Complete record detected - saving JSON backup locally...")
+                safe_log("info", f"Complete record detected - saving JSON backup locally...")
                 try:
                     json_saved = self.save_json_backup_locally(data)
                     if json_saved:
-                        self.logger.info(f" JSON backup saved locally for {ticket_no}")
+                        safe_log("info", f"✅ JSON backup saved locally for {ticket_no}")
                     else:
-                        self.logger.warning(f"⚠️ Failed to save JSON backup for {ticket_no}")
+                        safe_log("warning", f"⚠️ Failed to save JSON backup for {ticket_no}")
                 except Exception as json_error:
-                    self.logger.error(f"⚠️ JSON backup error (non-critical): {json_error}")
+                    safe_log("error", f"⚠️ JSON backup error (non-critical): {json_error}")
             
-            # PRIORITY 3: Auto-generate PDF for complete records - Save to data/reports/today folder
+            # PRIORITY 3: Auto-generate PDF for complete records - RESTORED
             pdf_generated = False
             pdf_path = None
             todays_reports_folder = None
             
             if is_complete_record:
-                self.logger.info(f"Complete record detected for ticket {ticket_no} - generating PDF locally...")
+                safe_log("info", f"Complete record detected for ticket {ticket_no} - generating PDF locally...")
                 try:
                     # Get today's reports folder path
                     todays_reports_folder = self.get_todays_reports_folder()
-                    self.logger.info(f"Reports will be saved to: {todays_reports_folder}")
+                    safe_log("info", f"Reports will be saved to: {todays_reports_folder}")
                     
                     pdf_generated, pdf_path = self.auto_generate_pdf_for_complete_record(data)
                     if pdf_generated:
-                        self.logger.info(f" PDF auto-generated locally: {pdf_path}")
+                        safe_log("info", f"✅ PDF auto-generated locally: {pdf_path}")
                     else:
-                        self.logger.warning("⚠️ PDF generation failed, but record and JSON were saved locally")
+                        safe_log("warning", "⚠️ PDF generation failed, but record and JSON were saved locally")
                 except Exception as pdf_error:
-                    self.logger.error(f"⚠️ PDF generation error (non-critical): {pdf_error}")
+                    safe_log("error", f"⚠️ PDF generation error (non-critical): {pdf_error}")
             
-            # IMPORTANT: NO CLOUD STORAGE ATTEMPTS HERE
-            self.logger.info(" OFFLINE-FIRST SAVE COMPLETED - Local CSV, JSON backup, and PDF generated")
+            # IMPORTANT: NO CLOUD STORAGE ATTEMPTS HERE - RESTORED
+            safe_log("info", "✅ OFFLINE-FIRST SAVE COMPLETED - Local CSV, JSON backup, and PDF generated")
             if todays_reports_folder:
-                self.logger.info(f"PDF saved to today's reports folder: {todays_reports_folder}")
-            self.logger.info(" Cloud backup available via Settings > Cloud Storage > Backup")
-            self.logger.info("="*50)
+                safe_log("info", f"📂 PDF saved to today's reports folder: {todays_reports_folder}")
+            safe_log("info", "💡 Cloud backup available via Settings > Cloud Storage > Backup")
+            safe_log("info", "="*50)
 
-            # FIXED: Check archive on EVERY complete record save (not random)
+            # RESTORED: Check archive on EVERY complete record save
             if is_complete_record:
                 try:
-                    self.logger.info(" Checking archive after complete record save...")
+                    safe_log("info", "🔍 Checking archive after complete record save...")
                     archive_success, archive_message = self.check_and_archive()
                     if archive_success:
-                        self.logger.info(f" Archive completed: {archive_message}")
+                        safe_log("info", f"📦 Archive completed: {archive_message}")
                     else:
-                        self.logger.info(f" Archive check: {archive_message}")
+                        safe_log("info", f"📦 Archive check: {archive_message}")
                 except Exception as archive_error:
-                    self.logger.error(f"Archive check error (non-critical): {archive_error}")
+                    safe_log("error", f"Archive check error (non-critical): {archive_error}")
             
-            # Return success and weighment info for the app to handle ticket flow
+            # Return success and weighment info for the app to handle ticket flow - RESTORED
             return {
                 'success': True,
                 'is_complete_record': is_complete_record,
@@ -257,42 +283,81 @@ class DataManager:
             }
                     
         except Exception as e:
-            self.logger.error(f" Critical error saving record: {e}")
+            # SAFE ERROR LOGGING
             try:
-                if messagebox:
+                if not getattr(self, 'is_shutting_down', False):
+                    self.logger.error(f"❌ Critical error saving record: {e}")
+                else:
+                    print(f"[CRITICAL-ERROR] Critical error saving record: {e}")
+            except Exception:
+                print(f"[CRITICAL-ERROR] Critical error saving record: {e}")
+            
+            try:
+                if messagebox and not getattr(self, 'is_shutting_down', False):
                     messagebox.showerror("Save Error", f"Failed to save record:\n{str(e)}")
-            except:
-                pass
+            except Exception:
+                print(f"[ERROR-DIALOG] Failed to save record: {e}")
+            
             return {'success': False, 'error': str(e)}
 
-
     def get_all_records(self):
-        """Thread-safe version of get_all_records"""
+        """RESTORED: Get all records with your proven working logic + I/O protection"""
+        # ADD: Check shutdown status first
+        if getattr(self, 'is_shutting_down', False):
+            print("🛑 DATA MANAGER: get_all_records blocked - shutdown in progress")
+            return []
+        
         records = []
         current_file = self.get_current_data_file()
         
         if not os.path.exists(current_file):
-            self.logger.warning(f"CSV file does not exist: {current_file}")
+            # SAFE LOGGING: Handle potential closed file errors
+            try:
+                if not getattr(self, 'is_shutting_down', False):
+                    self.logger.warning(f"CSV file does not exist: {current_file}")
+                else:
+                    print(f"[WARNING] CSV file does not exist: {current_file}")
+            except Exception:
+                print(f"[WARNING] CSV file does not exist: {current_file}")
             return records
             
-        with safe_csv_operation():
-            try:
-                with open(current_file, 'r', newline='', encoding='utf-8') as csv_file:
-                    reader = csv.reader(csv_file)
+        try:
+            # RESTORED: Use your original direct file opening approach (no safe_csv_operation wrapper)
+            with open(current_file, 'r', newline='', encoding='utf-8') as csv_file:
+                reader = csv.reader(csv_file)
+                
+                # Skip header
+                header = next(reader, None)
+                if not header:
+                    # SAFE LOGGING
+                    try:
+                        if not getattr(self, 'is_shutting_down', False):
+                            self.logger.warning("CSV file has no header")
+                        else:
+                            print("[WARNING] CSV file has no header")
+                    except Exception:
+                        print("[WARNING] CSV file has no header")
+                    return records
+                
+                # RESTORED: Debug logging (with safe logging)
+                try:
+                    if not getattr(self, 'is_shutting_down', False):
+                        self.logger.debug(f"CSV header: {header}")
+                        self.logger.debug(f"Expected header length: {len(config.CSV_HEADER)}")
+                        self.logger.debug(f"Actual header length: {len(header)}")
+                except Exception:
+                    pass  # Skip debug logging if it fails
+                
+                # RESTORED: Process records one by one (your original approach)
+                for row_num, row in enumerate(reader, 1):
+                    # ADD: Check shutdown during processing
+                    if getattr(self, 'is_shutting_down', False):
+                        print("🛑 DATA MANAGER: Breaking record read - shutdown in progress")
+                        break
                     
-                    # Skip header
-                    header = next(reader, None)
-                    if not header:
-                        self.logger.warning("CSV file has no header")
-                        return records
-                    
-                    # Read all records at once to minimize file open time
-                    all_rows = list(reader)
-                    
-                # Process records outside the file context
-                for row_num, row in enumerate(all_rows, 1):
                     try:
                         if len(row) >= 13:  # Minimum fields required
+                            # RESTORED: Handle both old and new CSV formats (your original logic)
                             record = {
                                 'date': row[0] if len(row) > 0 else '',
                                 'time': row[1] if len(row) > 1 else '',
@@ -308,6 +373,7 @@ class DataManager:
                                 'second_timestamp': row[11] if len(row) > 11 else '',
                                 'net_weight': row[12] if len(row) > 12 else '',
                                 'material_type': row[13] if len(row) > 13 else '',
+                                # Handle variable number of image fields
                                 'first_front_image': row[14] if len(row) > 14 else '',
                                 'first_back_image': row[15] if len(row) > 15 else '',
                                 'second_front_image': row[16] if len(row) > 16 else '',
@@ -316,16 +382,54 @@ class DataManager:
                                 'user_name': row[19] if len(row) > 19 else ''
                             }
                             records.append(record)
+                        else:
+                            # SAFE LOGGING for row warnings
+                            try:
+                                if not getattr(self, 'is_shutting_down', False):
+                                    self.logger.warning(f"Skipping row {row_num} - insufficient data: {len(row)} fields")
+                                else:
+                                    print(f"[WARNING] Skipping row {row_num} - insufficient data: {len(row)} fields")
+                            except Exception:
+                                print(f"[WARNING] Skipping row {row_num} - insufficient data: {len(row)} fields")
+                            
                     except Exception as row_error:
-                        self.logger.warning(f"Error processing row {row_num}: {row_error}")
+                        # SAFE LOGGING for row errors
+                        try:
+                            if not getattr(self, 'is_shutting_down', False):
+                                self.logger.error(f"Error processing row {row_num}: {row_error}")
+                            else:
+                                print(f"[ERROR] Error processing row {row_num}: {row_error}")
+                        except Exception:
+                            print(f"[ERROR] Error processing row {row_num}: {row_error}")
                         continue
                         
-                self.logger.info(f"Successfully loaded {len(records)} records from {current_file}")
-                return records
+            # SAFE LOGGING for success
+            try:
+                if not getattr(self, 'is_shutting_down', False):
+                    self.logger.info(f"Successfully loaded {len(records)} records from {current_file}")
+                else:
+                    print(f"[INFO] Successfully loaded {len(records)} records from {current_file}")
+            except Exception:
+                print(f"[INFO] Successfully loaded {len(records)} records from {current_file}")
+            
+            return records
                 
-            except Exception as e:
-                self.logger.error(f"Error reading records from {current_file}: {e}")
-                return records
+        except Exception as e:
+            # ENHANCED ERROR HANDLING: Check for specific I/O errors during shutdown
+            if "closed file" in str(e).lower() and getattr(self, 'is_shutting_down', False):
+                print("🛑 DATA MANAGER: File operation interrupted by shutdown")
+                return []
+            
+            # SAFE LOGGING for general errors
+            try:
+                if not getattr(self, 'is_shutting_down', False):
+                    self.logger.error(f"Error reading records from {current_file}: {e}")
+                else:
+                    print(f"[ERROR] Error reading records from {current_file}: {e}")
+            except Exception:
+                print(f"[ERROR] Error reading records from {current_file}: {e}")
+            
+            return []
     
     def _setup_fallback_folders(self):
         """Setup fallback folders when main setup fails"""
@@ -827,7 +931,7 @@ class DataManager:
 
     # Continue with rest of the methods...
     def calculate_and_set_net_weight(self, data):
-        """FIXED: Properly calculate and set net weight in the data"""
+        """FIXED: Properly calculate and set net weight in the data with safe logging"""
         try:
             first_weight_str = data.get('first_weight', '').strip()
             second_weight_str = data.get('second_weight', '').strip()
@@ -842,21 +946,44 @@ class DataManager:
                     # CRITICAL FIX: Set the calculated net weight in the data
                     data['net_weight'] = f"{net_weight:.2f}"
                     
-                    self.logger.info(f"Net weight calculated: {first_weight} - {second_weight} = {net_weight:.2f}")
+                    # SAFE LOGGING: Use safe logging to prevent I/O errors
+                    self._safe_data_log("info", f"Net weight calculated: {first_weight} - {second_weight} = {net_weight:.2f}")
                     
                 except (ValueError, TypeError) as e:
-                    self.logger.error(f"Error calculating net weight: {e}")
+                    self._safe_data_log("error", f"Error calculating net weight: {e}")
                     data['net_weight'] = ""
             else:
                 # If either weight is missing, clear net weight
                 data['net_weight'] = ""
-                self.logger.info("Net weight cleared - incomplete weighments")
+                self._safe_data_log("info", "Net weight cleared - incomplete weighments")
             
             return data
             
         except Exception as e:
-            self.logger.error(f"Error in calculate_and_set_net_weight: {e}")
+            self._safe_data_log("error", f"Error in calculate_and_set_net_weight: {e}")
             return data
+
+
+
+    def _safe_shutdown_protection_log(self, level, message):
+        """Enhanced safe logging with shutdown protection"""
+        try:
+            # Check shutdown status first
+            if getattr(self, 'is_shutting_down', False):
+                print(f"[{level.upper()}] {message}")
+                return
+            
+            # Try normal logging
+            if hasattr(self, 'logger'):
+                getattr(self.logger, level)(message)
+        except (ValueError, OSError, AttributeError) as e:
+            if "closed file" in str(e).lower():
+                print(f"[{level.upper()}] {message}")
+            else:
+                print(f"[LOG-ERROR] {e}")
+                print(f"[{level.upper()}] {message}")
+        except Exception:
+            print(f"[{level.upper()}] {message}")
 
 
     def auto_generate_pdf_for_complete_record(self, record_data):
@@ -960,15 +1087,96 @@ class DataManager:
             # Fallback to data folder
             self.today_pdf_folder = config.DATA_FOLDER
 
-    def is_record_complete(self, record_data):
-        """Check if a record has both weighments complete
-        
-        Args:
-            record_data: Record data dictionary
+    def save_to_cloud_with_images(self, data):
+        """Save record with images to Google Cloud Storage - ONLY WHEN EXPLICITLY CALLED"""
+        try:
+            # Check if both weighments are complete before saving to cloud
+            first_weight = data.get('first_weight', '').strip()
+            first_timestamp = data.get('first_timestamp', '').strip()
+            second_weight = data.get('second_weight', '').strip()
+            second_timestamp = data.get('second_timestamp', '').strip()
             
-        Returns:
-            bool: True if both weighments are complete
-        """
+            # Only save to cloud if both weighments are complete
+            if not (first_weight and first_timestamp and second_weight and second_timestamp):
+                self._safe_data_log("info", f"Skipping cloud save for ticket {data.get('ticket_no', 'unknown')} - incomplete weighments")
+                return False, 0, 0
+            
+            # Check if cloud storage is enabled
+            if not (hasattr(config, 'USE_CLOUD_STORAGE') and config.USE_CLOUD_STORAGE):
+                self._safe_data_log("info", "Cloud storage disabled - skipping")
+                return False, 0, 0
+            
+            # Initialize cloud storage if needed
+            if not self.init_cloud_storage_if_needed():
+                return False, 0, 0
+            
+            # Check if connected to cloud storage
+            try:
+                if not self.cloud_storage.is_connected():
+                    self._safe_data_log("warning", "Not connected to cloud storage (offline or configuration issue)")
+                    return False, 0, 0
+            except Exception as conn_error:
+                self._safe_data_log("error", f"Cloud connection check failed: {conn_error}")
+                return False, 0, 0
+            
+            # Get site name and ticket number for folder structure
+            site_name = data.get('site_name', 'Unknown_Site').replace(' ', '_').replace('/', '_')
+            agency_name = data.get('agency_name', 'Unknown_Agency').replace(' ', '_').replace('/', '_')
+            ticket_no = data.get('ticket_no', 'unknown')
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create structured filename: agency_name/site_name/ticket_number/timestamp.json
+            json_filename = f"{agency_name}/{site_name}/{ticket_no}/{timestamp}.json"
+            
+            # Add some additional metadata to the JSON
+            enhanced_data = data.copy()
+            enhanced_data['cloud_upload_timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            enhanced_data['record_status'] = 'complete'  # Mark as complete record
+            enhanced_data['net_weight_calculated'] = self._calculate_net_weight_for_cloud(
+                enhanced_data.get('first_weight', ''), 
+                enhanced_data.get('second_weight', '')
+            )
+            
+            # Upload record with images using the new method
+            json_success, images_uploaded, total_images = self.cloud_storage.upload_record_with_images(
+                enhanced_data, 
+                json_filename, 
+                config.IMAGES_FOLDER
+            )
+            
+            if json_success:
+                self._safe_data_log("info", f"Record {ticket_no} successfully saved to cloud at {json_filename}")
+                if images_uploaded > 0:
+                    self._safe_data_log("info", f"Uploaded {images_uploaded}/{total_images} images for ticket {ticket_no}")
+                else:
+                    self._safe_data_log("info", f"No images found to upload for ticket {ticket_no}")
+            else:
+                self._safe_data_log("error", f"Failed to save record {ticket_no} to cloud")
+                
+            return json_success, images_uploaded, total_images
+            
+        except Exception as e:
+            self._safe_data_log("error", f"Error saving to cloud with images: {str(e)}")
+            return False, 0, 0
+
+    def _safe_data_log(self, level, message):
+        """Safe logging method for DataManager that won't fail on closed files"""
+        try:
+            if hasattr(self, 'logger') and not getattr(self, 'is_shutting_down', False):
+                getattr(self.logger, level)(message)
+        except (ValueError, OSError, AttributeError) as e:
+            if "closed file" in str(e).lower() or "I/O operation" in str(e):
+                # Fallback to print for closed file errors
+                print(f"DataManager {level.upper()}: {message}")
+            else:
+                print(f"DataManager LOG-ERROR: {e}")
+                print(f"DataManager {level.upper()}: {message}")
+        except Exception:
+            # Ultimate fallback - just print
+            print(f"DataManager {level.upper()}: {message}")
+
+    def is_record_complete(self, record_data):
+        """Check if a record has both weighments complete with safe logging"""
         try:
             first_weight = record_data.get('first_weight', '').strip()
             first_timestamp = record_data.get('first_timestamp', '').strip()
@@ -977,19 +1185,18 @@ class DataManager:
             
             is_complete = bool(first_weight and first_timestamp and second_weight and second_timestamp)
             
-            self.logger.debug(f"Record completion check:")
-            self.logger.debug(f"  First weight: '{first_weight}' ({bool(first_weight)})")
-            self.logger.debug(f"  First timestamp: '{first_timestamp}' ({bool(first_timestamp)})")
-            self.logger.debug(f"  Second weight: '{second_weight}' ({bool(second_weight)})")
-            self.logger.debug(f"  Second timestamp: '{second_timestamp}' ({bool(second_timestamp)})")
-            self.logger.debug(f"  Complete: {is_complete}")
+            self._safe_data_log("debug", f"Record completion check:")
+            self._safe_data_log("debug", f"  First weight: '{first_weight}' ({bool(first_weight)})")
+            self._safe_data_log("debug", f"  First timestamp: '{first_timestamp}' ({bool(first_timestamp)})")
+            self._safe_data_log("debug", f"  Second weight: '{second_weight}' ({bool(second_weight)})")
+            self._safe_data_log("debug", f"  Second timestamp: '{second_timestamp}' ({bool(second_timestamp)})")
+            self._safe_data_log("debug", f"  Complete: {is_complete}")
             
             return is_complete
             
         except Exception as e:
-            self.logger.error(f"Error checking record completion: {e}")
+            self._safe_data_log("error", f"Error checking record completion: {e}")
             return False
-
 
     def get_daily_pdf_folder(self):
         """Get or create today's PDF folder"""
@@ -2069,77 +2276,7 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
                 return False
         return True
 
-    def save_to_cloud_with_images(self, data):
-        """Save record with images to Google Cloud Storage - ONLY WHEN EXPLICITLY CALLED"""
-        try:
-            # Check if both weighments are complete before saving to cloud
-            first_weight = data.get('first_weight', '').strip()
-            first_timestamp = data.get('first_timestamp', '').strip()
-            second_weight = data.get('second_weight', '').strip()
-            second_timestamp = data.get('second_timestamp', '').strip()
-            
-            # Only save to cloud if both weighments are complete
-            if not (first_weight and first_timestamp and second_weight and second_timestamp):
-                self.logger.info(f"Skipping cloud save for ticket {data.get('ticket_no', 'unknown')} - incomplete weighments")
-                return False, 0, 0
-            
-            # Check if cloud storage is enabled
-            if not (hasattr(config, 'USE_CLOUD_STORAGE') and config.USE_CLOUD_STORAGE):
-                self.logger.info("Cloud storage disabled - skipping")
-                return False, 0, 0
-            
-            # Initialize cloud storage if needed
-            if not self.init_cloud_storage_if_needed():
-                return False, 0, 0
-            
-            # Check if connected to cloud storage
-            try:
-                if not self.cloud_storage.is_connected():
-                    self.logger.warning("Not connected to cloud storage (offline or configuration issue)")
-                    return False, 0, 0
-            except Exception as conn_error:
-                self.logger.error(f"Cloud connection check failed: {conn_error}")
-                return False, 0, 0
-            
-            # Get site name and ticket number for folder structure
-            site_name = data.get('site_name', 'Unknown_Site').replace(' ', '_').replace('/', '_')
-            agency_name = data.get('agency_name', 'Unknown_Agency').replace(' ', '_').replace('/', '_')
-            ticket_no = data.get('ticket_no', 'unknown')
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Create structured filename: agency_name/site_name/ticket_number/timestamp.json
-            json_filename = f"{agency_name}/{site_name}/{ticket_no}/{timestamp}.json"
-            
-            # Add some additional metadata to the JSON
-            enhanced_data = data.copy()
-            enhanced_data['cloud_upload_timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            enhanced_data['record_status'] = 'complete'  # Mark as complete record
-            enhanced_data['net_weight_calculated'] = self._calculate_net_weight_for_cloud(
-                enhanced_data.get('first_weight', ''), 
-                enhanced_data.get('second_weight', '')
-            )
-            
-            # Upload record with images using the new method
-            json_success, images_uploaded, total_images = self.cloud_storage.upload_record_with_images(
-                enhanced_data, 
-                json_filename, 
-                config.IMAGES_FOLDER
-            )
-            
-            if json_success:
-                self.logger.info(f"Record {ticket_no} successfully saved to cloud at {json_filename}")
-                if images_uploaded > 0:
-                    self.logger.info(f"Uploaded {images_uploaded}/{total_images} images for ticket {ticket_no}")
-                else:
-                    self.logger.info(f"No images found to upload for ticket {ticket_no}")
-            else:
-                self.logger.error(f"Failed to save record {ticket_no} to cloud")
-                
-            return json_success, images_uploaded, total_images
-            
-        except Exception as e:
-            self.logger.error(f"Error saving to cloud with images: {str(e)}")
-            return False, 0, 0
+
 
     def _calculate_net_weight_for_cloud(self, first_weight_str, second_weight_str):
         """Calculate net weight for cloud storage"""
