@@ -51,6 +51,7 @@ from settings_storage import SettingsStorage
 from login_dialog import LoginDialog
 import pandas._libs.testing
 from unified_logging import setup_unified_logging
+from data_management import safe_csv_operation
 try:
     from simple_connectivity import add_connectivity_to_app, add_to_queue_if_available, cleanup_connectivity
     CONNECTIVITY_AVAILABLE = True
@@ -1311,37 +1312,62 @@ class TharuniApp:
 
 
     def load_pending_vehicle(self, ticket_no):
-        """FIXED: Load a pending vehicle when selected from the pending vehicles panel"""
+        """Load a pending ticket for second weighment with safe file handling"""
         try:
-            self.logger.info(f"Loading pending vehicle: {ticket_no}")
+            if not hasattr(self, 'data_manager') or not self.data_manager:
+                print(f"No data manager available for loading ticket {ticket_no}")
+                return False
             
-            if hasattr(self, 'main_form'):
-                # Switch to main tab
-                self.notebook.select(0)
+            # Use safe_csv_operation to prevent file conflicts
+            with safe_csv_operation():
+                records = self.data_manager.get_filtered_records(ticket_no)
                 
-                # Load the pending ticket data into the form
-                success = self.main_form.load_pending_ticket(ticket_no)
+                for record in records:
+                    if record.get('ticket_no') == ticket_no:
+                        first_weight = record.get('first_weight', '').strip()
+                        first_timestamp = record.get('first_timestamp', '').strip()
+                        second_weight = record.get('second_weight', '').strip()
+                        second_timestamp = record.get('second_timestamp', '').strip()
+                        
+                        if second_weight and second_timestamp:
+                            # Already completed
+                            messagebox.showinfo("Completed Record", 
+                                            "This ticket already has both weighments completed.")
+                            self.load_record_data(record)
+                            self.current_weighment = "second"
+                            self.weighment_state_var.set("Weighment Complete")
+                            return True
+                        elif first_weight and first_timestamp:
+                            # Ready for second weighment
+                            print(f"Loading pending ticket {ticket_no} for second weighment")
+                            self.load_record_data(record)
+                            self.current_weighment = "second"
+                            self.weighment_state_var.set("Second Weighment")
+                            return True
+                        else:
+                            print(f"Ticket {ticket_no} doesn't have valid first weighment data")
+                            return False
                 
-                if success:
-                    self.logger.info(f"Successfully loaded pending ticket: {ticket_no}")
-                    # Inform the user they need to capture weight manually
-                    if self.is_weighbridge_connected():
-                        messagebox.showinfo("Vehicle Selected", 
-                                        f"Ticket {ticket_no} loaded for second weighment.\n"
-                                        "Press 'Capture Weight' button when the vehicle is on the weighbridge.")
-                    else:
-                        messagebox.showinfo("Vehicle Selected", 
-                                        f"Ticket {ticket_no} loaded for second weighment.\n"
-                                        "Please connect weighbridge and capture weight when ready.")
-                else:
-                    self.logger.error(f"Failed to load pending ticket: {ticket_no}")
-                    messagebox.showerror("Error", f"Could not load ticket {ticket_no}")
-            else:
-                self.logger.error("Main form not available")
+                print(f"No matching record found for ticket {ticket_no}")
+                return False
                 
         except Exception as e:
-            self.logger.error(f"Error loading pending vehicle {ticket_no}: {e}")
-            messagebox.showerror("Error", f"Error loading vehicle: {str(e)}")
+            if "closed file" in str(e).lower() or "i/o operation" in str(e).lower():
+                print(f"File I/O error loading ticket {ticket_no}: {e}")
+                # Retry once after a brief delay
+                try:
+                    import time
+                    time.sleep(0.5)
+                    return self.load_pending_ticket(ticket_no)  # Single retry
+                except:
+                    messagebox.showerror("File Access Error", 
+                                    f"Unable to load ticket {ticket_no} due to file access conflict.\n"
+                                    "Please try again in a moment.")
+                    return False
+            else:
+                print(f"Error loading pending ticket {ticket_no}: {e}")
+                messagebox.showerror("Error", f"Error loading ticket {ticket_no}: {str(e)}")
+                return False
 
     def create_header(self, parent):
             """Create compressed header with all info in single line"""

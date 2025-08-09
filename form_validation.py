@@ -1,6 +1,6 @@
 from tkinter import messagebox
 import logging
-
+from data_management import safe_csv_operation
 class FormValidator:
     """FIXED: Handles form validation logic with correct pending vehicle validation and robust logging"""
     
@@ -333,46 +333,76 @@ class FormValidator:
             return False  # STRICT BLOCK on errors
 
     def validate_form(self):
-        """ENHANCED: Validate all form fields before saving - FIXED pending logic"""
+        """Enhanced form validation with safe file operation handling"""
         try:
-            self._safe_log("info", "Starting comprehensive form validation")
+            self.logger.info("Starting comprehensive form validation")
             
-            # Step 1: Validate basic required fields
-            if not self.validate_basic_fields():
-                return False
-            
-            # Step 2: FIXED - Check if vehicle is pending ONLY for NEW first weighments
-            current_weighment = getattr(self.main_form, 'current_weighment', 'first')
-            if current_weighment == "first":
-                # Only check pending for NEW first weighments
-                if not self.validate_vehicle_not_in_pending_for_new_weighment("save"):
-                    return False
-            else:
-                # For second weighments, allow even if vehicle was pending
-                self._safe_log("info", "SECOND weighment - skipping pending check (this is correct)")
-            
-            # Step 3: Validate weighment data
-            if not self.validate_weighment_data():
-                return False
-            
-            # Step 4: Validate images (optional but warn user)
-            if not self.validate_images():
-                # Images validation failed, but ask user if they want to continue
-                result = messagebox.askyesno("Missing Images", 
-                                        "No images have been captured for this weighment. "
-                                        "Continue without images?")
-                if not result:
-                    self._safe_log("info", "User chose not to continue without images")
-                    return False
-                else:
-                    self._safe_log("info", "User chose to continue without images")
-            
-            self._safe_log("info", "Form validation passed successfully")
-            return True
-            
+            # Wrap entire validation in safe_csv_operation to prevent file conflicts
+            with safe_csv_operation():
+                
+                # Pause background operations during validation
+                main_app = self.find_main_app()
+                if main_app and hasattr(main_app, 'pause_background_operations'):
+                    main_app.pause_background_operations()
+                
+                try:
+                    # Step 1: Validate basic required fields
+                    if not self.validate_basic_fields():
+                        return False
+                    
+                    # Step 2: Check vehicle pending (your existing logic)
+                    current_weighment = getattr(self.main_form, 'current_weighment', 'first')
+                    if current_weighment == "first":
+                        if not self.validate_vehicle_not_in_pending_for_new_weighment("save"):
+                            return False
+                    else:
+                        self.logger.info("SECOND weighment - skipping pending check (this is correct)")
+                    
+                    # Step 3: Validate weighment data
+                    if not self.validate_weighment_data():
+                        return False
+                    
+                    # Step 4: Validate images with safe error handling
+                    try:
+                        if not self.validate_images():
+                            result = messagebox.askyesno("Missing Images", 
+                                                    "No images captured. Continue without images?")
+                            if not result:
+                                return False
+                    except Exception as img_error:
+                        if "closed file" in str(img_error).lower():
+                            print(f"[IMAGE-VALIDATION-ERROR] File I/O error during image validation: {img_error}")
+                            # Allow to continue - images are optional
+                            pass
+                        else:
+                            raise
+                    
+                    self.logger.info("Form validation passed successfully")
+                    return True
+                    
+                finally:
+                    # Resume operations after validation
+                    try:
+                        if main_app and hasattr(main_app, 'resume_background_operations'):
+                            main_app.after(1000, main_app.resume_background_operations)
+                    except:
+                        pass
+                
         except Exception as e:
-            self._safe_log("error", f"Error in form validation: {e}")
-            return False
+            # Enhanced error handling for file conflicts
+            if "closed file" in str(e).lower() or "i/o operation" in str(e).lower():
+                print(f"[VALIDATION-ERROR] File I/O error during validation: {e}")
+                self.logger.error(f"File I/O error during validation: {e}")
+                
+                # Ask user if they want to proceed
+                result = messagebox.askyesno("File Access Conflict", 
+                                        "File access conflict during validation.\n"
+                                        "This may be due to background operations.\n\n"
+                                        "Do you want to proceed with save anyway?")
+                return result
+            else:
+                self.logger.error(f"Error in form validation: {e}")
+                return False
     
     def validate_images(self):
         """Validate that at least one image is captured for current weighment"""

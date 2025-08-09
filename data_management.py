@@ -300,9 +300,73 @@ class DataManager:
             
             return {'success': False, 'error': str(e)}
 
+    def get_filtered_records(self, filter_text=""):
+        """Get records filtered by text with simplified safe file handling"""
+        try:
+            # Check shutdown status first
+            if getattr(self, 'is_shutting_down', False):
+                print("🛑 DATA MANAGER: get_filtered_records blocked - shutdown in progress")
+                return []
+            
+            # Get the current data file
+            current_file = self.get_current_data_file()
+            
+            if not os.path.exists(current_file):
+                self._safe_data_log("warning", f"CSV file does not exist: {current_file}")
+                return []
+            
+            # Simple retry logic without complex context managers
+            for attempt in range(3):
+                try:
+                    all_records = []
+                    
+                    # Read all data at once with simple file handling
+                    with open(current_file, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
+                        reader = csv.DictReader(csv_file)
+                        all_records = list(reader)  # Read everything immediately
+                    
+                    self._safe_data_log("info", f"Successfully loaded {len(all_records)} records")
+                    
+                    # Filter outside of file operations
+                    if not filter_text:
+                        self._safe_data_log("info", f"Returning all {len(all_records)} records (no filter)")
+                        return all_records
+                    
+                    filter_text = filter_text.lower().strip()
+                    filtered_records = []
+                    
+                    for record in all_records:
+                        try:
+                            # Check if filter text exists in any field
+                            if any(filter_text in str(value).lower() for value in record.values() if value is not None):
+                                filtered_records.append(record)
+                        except Exception as filter_error:
+                            self._safe_data_log("warning", f"Error filtering record: {filter_error}")
+                            continue
+                    
+                    self._safe_data_log("info", f"Filtered {len(all_records)} records to {len(filtered_records)} using filter: '{filter_text}'")
+                    return filtered_records
+                    
+                except Exception as read_error:
+                    error_str = str(read_error).lower()
+                    if ("closed file" in error_str or "i/o operation" in error_str) and attempt < 2:
+                        print(f"[RETRY] get_filtered_records attempt {attempt + 1} failed, retrying: {read_error}")
+                        time.sleep(0.3 * (attempt + 1))  # Progressive delay
+                        continue
+                    else:
+                        raise
+            
+            # If all retries failed
+            self._safe_data_log("error", f"All retry attempts failed for get_filtered_records")
+            return []
+            
+        except Exception as e:
+            self._safe_data_log("error", f"Error in get_filtered_records: {e}")
+            return []
+
     def get_all_records(self):
-        """RESTORED: Get all records with your proven working logic + I/O protection"""
-        # ADD: Check shutdown status first
+        """Simplified get_all_records with retry logic"""
+        # Check shutdown status first
         if getattr(self, 'is_shutting_down', False):
             print("🛑 DATA MANAGER: get_all_records blocked - shutdown in progress")
             return []
@@ -311,53 +375,33 @@ class DataManager:
         current_file = self.get_current_data_file()
         
         if not os.path.exists(current_file):
-            # SAFE LOGGING: Handle potential closed file errors
-            try:
-                if not getattr(self, 'is_shutting_down', False):
-                    self.logger.warning(f"CSV file does not exist: {current_file}")
-                else:
-                    print(f"[WARNING] CSV file does not exist: {current_file}")
-            except Exception:
-                print(f"[WARNING] CSV file does not exist: {current_file}")
+            self._safe_data_log("warning", f"CSV file does not exist: {current_file}")
             return records
-            
-        try:
-            # RESTORED: Use your original direct file opening approach (no safe_csv_operation wrapper)
-            with open(current_file, 'r', newline='', encoding='utf-8') as csv_file:
-                reader = csv.reader(csv_file)
+        
+        # Simple retry logic without complex context managers
+        for attempt in range(3):
+            try:
+                with open(current_file, 'r', newline='', encoding='utf-8', errors='replace') as csv_file:
+                    reader = csv.reader(csv_file)
+                    
+                    # Skip header
+                    header = next(reader, None)
+                    if not header:
+                        self._safe_data_log("warning", "CSV file has no header")
+                        return records
+                    
+                    # Read all records at once
+                    all_rows = list(reader)
                 
-                # Skip header
-                header = next(reader, None)
-                if not header:
-                    # SAFE LOGGING
-                    try:
-                        if not getattr(self, 'is_shutting_down', False):
-                            self.logger.warning("CSV file has no header")
-                        else:
-                            print("[WARNING] CSV file has no header")
-                    except Exception:
-                        print("[WARNING] CSV file has no header")
-                    return records
-                
-                # RESTORED: Debug logging (with safe logging)
-                try:
-                    if not getattr(self, 'is_shutting_down', False):
-                        self.logger.debug(f"CSV header: {header}")
-                        self.logger.debug(f"Expected header length: {len(config.CSV_HEADER)}")
-                        self.logger.debug(f"Actual header length: {len(header)}")
-                except Exception:
-                    pass  # Skip debug logging if it fails
-                
-                # RESTORED: Process records one by one (your original approach)
-                for row_num, row in enumerate(reader, 1):
-                    # ADD: Check shutdown during processing
+                # Process records outside the file context
+                for row_num, row in enumerate(all_rows, 1):
+                    # Check shutdown during processing
                     if getattr(self, 'is_shutting_down', False):
                         print("🛑 DATA MANAGER: Breaking record read - shutdown in progress")
                         break
                     
                     try:
                         if len(row) >= 13:  # Minimum fields required
-                            # RESTORED: Handle both old and new CSV formats (your original logic)
                             record = {
                                 'date': row[0] if len(row) > 0 else '',
                                 'time': row[1] if len(row) > 1 else '',
@@ -373,7 +417,6 @@ class DataManager:
                                 'second_timestamp': row[11] if len(row) > 11 else '',
                                 'net_weight': row[12] if len(row) > 12 else '',
                                 'material_type': row[13] if len(row) > 13 else '',
-                                # Handle variable number of image fields
                                 'first_front_image': row[14] if len(row) > 14 else '',
                                 'first_back_image': row[15] if len(row) > 15 else '',
                                 'second_front_image': row[16] if len(row) > 16 else '',
@@ -382,55 +425,26 @@ class DataManager:
                                 'user_name': row[19] if len(row) > 19 else ''
                             }
                             records.append(record)
-                        else:
-                            # SAFE LOGGING for row warnings
-                            try:
-                                if not getattr(self, 'is_shutting_down', False):
-                                    self.logger.warning(f"Skipping row {row_num} - insufficient data: {len(row)} fields")
-                                else:
-                                    print(f"[WARNING] Skipping row {row_num} - insufficient data: {len(row)} fields")
-                            except Exception:
-                                print(f"[WARNING] Skipping row {row_num} - insufficient data: {len(row)} fields")
-                            
                     except Exception as row_error:
-                        # SAFE LOGGING for row errors
-                        try:
-                            if not getattr(self, 'is_shutting_down', False):
-                                self.logger.error(f"Error processing row {row_num}: {row_error}")
-                            else:
-                                print(f"[ERROR] Error processing row {row_num}: {row_error}")
-                        except Exception:
-                            print(f"[ERROR] Error processing row {row_num}: {row_error}")
+                        self._safe_data_log("warning", f"Error processing row {row_num}: {row_error}")
                         continue
-                        
-            # SAFE LOGGING for success
-            try:
-                if not getattr(self, 'is_shutting_down', False):
-                    self.logger.info(f"Successfully loaded {len(records)} records from {current_file}")
-                else:
-                    print(f"[INFO] Successfully loaded {len(records)} records from {current_file}")
-            except Exception:
-                print(f"[INFO] Successfully loaded {len(records)} records from {current_file}")
-            
-            return records
                 
-        except Exception as e:
-            # ENHANCED ERROR HANDLING: Check for specific I/O errors during shutdown
-            if "closed file" in str(e).lower() and getattr(self, 'is_shutting_down', False):
-                print("🛑 DATA MANAGER: File operation interrupted by shutdown")
-                return []
-            
-            # SAFE LOGGING for general errors
-            try:
-                if not getattr(self, 'is_shutting_down', False):
-                    self.logger.error(f"Error reading records from {current_file}: {e}")
+                self._safe_data_log("info", f"Successfully loaded {len(records)} records from {current_file}")
+                return records
+                
+            except Exception as read_error:
+                error_str = str(read_error).lower()
+                if ("closed file" in error_str or "i/o operation" in error_str) and attempt < 2:
+                    print(f"[RETRY] get_all_records attempt {attempt + 1} failed, retrying: {read_error}")
+                    time.sleep(0.3 * (attempt + 1))  # Progressive delay
+                    continue
                 else:
-                    print(f"[ERROR] Error reading records from {current_file}: {e}")
-            except Exception:
-                print(f"[ERROR] Error reading records from {current_file}: {e}")
-            
-            return []
-    
+                    raise
+        
+        # If all retries failed
+        self._safe_data_log("error", f"All retry attempts failed for get_all_records")
+        return []
+
     def _setup_fallback_folders(self):
         """Setup fallback folders when main setup fails"""
         try:
@@ -1824,31 +1838,6 @@ GENERATED BY: Swaccha Andhra Corporation Weighbridge System
         except Exception as e:
             self.logger.error(f" Error updating record: {e}")
             return False
-
-
-
-    def get_filtered_records(self, filter_text=""):
-        """Get records filtered by text with logging"""
-        try:
-            all_records = self.get_all_records()
-            
-            if not filter_text:
-                self.logger.info(f"Returning all {len(all_records)} records (no filter)")
-                return all_records
-                
-            filter_text = filter_text.lower()
-            filtered_records = []
-            
-            for record in all_records:
-                # Check if filter text exists in any field
-                if any(filter_text in str(value).lower() for value in record.values()):
-                    filtered_records.append(record)
-                    
-            self.logger.info(f"Filtered {len(all_records)} records to {len(filtered_records)} using filter: '{filter_text}'")
-            return filtered_records
-        except Exception as e:
-            self.logger.error(f"Error filtering records: {e}")
-            return []
 
 
 

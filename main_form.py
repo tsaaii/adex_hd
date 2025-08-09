@@ -11,6 +11,7 @@ import threading
 import config
 from ui_components import HoverButton
 from camera import CameraView, add_watermark
+from data_management import safe_csv_operation
 
 # Import modular components
 from form_validation import FormValidator
@@ -314,7 +315,7 @@ class MainForm:
                 second_back = bool(self.image_handler.main_form.second_back_image_path)
                 
                 # Update first weighment status
-                first_status = f"Front: {'' if first_front else '❌'} Back: {'' if first_back else '❌'}"
+                first_status = f"Front: {'✅' if first_front else '❌'} Back: {'' if first_back else '❌'}"
                 if hasattr(self, 'first_image_status_var'):
                     self.first_image_status_var.set(first_status)
                     if hasattr(self, 'first_image_status'):
@@ -322,7 +323,7 @@ class MainForm:
                         self.first_image_status.config(foreground=color)
                 
                 # Update second weighment status
-                second_status = f"Front: {'' if second_front else '❌'} Back: {'' if second_back else '❌'}"
+                second_status = f"Front: {'✅' if second_front else '❌'} Back: {'' if second_back else '❌'}"
                 if hasattr(self, 'second_image_status_var'):
                     self.second_image_status_var.set(second_status)
                     if hasattr(self, 'second_image_status'):
@@ -2000,7 +2001,6 @@ class MainForm:
             self.logger.error(f"Error in form validation delegation: {e}")
             messagebox.showerror("Validation Error", f"Form validation failed: {str(e)}")
             return False
-
 
     def set_agency(self, agency_name):
         """Set the agency name"""

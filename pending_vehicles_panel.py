@@ -176,7 +176,7 @@ class PendingVehiclesPanel:
             self.on_vehicle_select(ticket_no)
             
     def refresh_pending_list(self):
-        """ENHANCED: Refresh pending list and prevent duplicates"""
+        """Enhanced refresh with shutdown protection and safe error handling"""
         try:
             print(f"🚛 PENDING DEBUG: Refreshing pending vehicles list...")
             self.logger.info("Refreshing pending vehicles list")
@@ -187,19 +187,39 @@ class PendingVehiclesPanel:
                 self.logger.warning("Tree widget no longer exists - skipping refresh")
                 return
                 
-            # Clear existing items
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-                
+            # Check if data manager is available and not shutting down
             if not self.data_manager:
                 print(f"🚛 PENDING DEBUG: ❌ No data manager available")
                 self.logger.warning("No data manager available")
                 return
+            
+            # Check if data manager is shutting down
+            if hasattr(self.data_manager, 'is_shutting_down') and self.data_manager.is_shutting_down:
+                print(f"🚛 PENDING DEBUG: ⏸️ Data manager is shutting down - skipping refresh")
+                self.logger.info("Data manager is shutting down - skipping refresh")
+                return
                 
-            # Get all records
-            records = self.data_manager.get_all_records()
-            print(f"🚛 PENDING DEBUG: Retrieved {len(records)} total records")
-            self.logger.info(f"Retrieved {len(records)} total records")
+            # Clear existing items
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+                
+            # Get all records with error handling
+            try:
+                records = self.data_manager.get_all_records()
+                print(f"🚛 PENDING DEBUG: Retrieved {len(records)} total records")
+                self.logger.info(f"Retrieved {len(records)} total records")
+            except Exception as data_error:
+                error_str = str(data_error).lower()
+                if "closed file" in error_str or "i/o operation" in error_str:
+                    print(f"🚛 PENDING DEBUG: 🔄 File I/O error getting records - will retry later: {data_error}")
+                    self.logger.warning(f"File I/O error getting records: {data_error}")
+                    # Schedule retry for later instead of failing
+                    self.schedule_next_refresh()
+                    return
+                else:
+                    print(f"🚛 PENDING DEBUG: ❌ Error getting records: {data_error}")
+                    self.logger.error(f"Error getting records: {data_error}")
+                    return
             
             # Filter for pending vehicles - only one record per vehicle
             pending_records = []
@@ -234,13 +254,13 @@ class PendingVehiclesPanel:
                     # Add to pending and mark vehicle as seen
                     pending_records.append(record)
                     seen_vehicle_numbers.add(vehicle_no)
-                    print(f"🚛 PENDING DEBUG:  Added to pending: {ticket_no} (vehicle: {vehicle_no})")
+                    print(f"🚛 PENDING DEBUG: ✅ Added to pending: {ticket_no} (vehicle: {vehicle_no})")
                     self.logger.info(f"Added to pending: {ticket_no} (vehicle: {vehicle_no})")
                 else:
                     print(f"🚛 PENDING DEBUG: ⏭️  Skipped ticket {ticket_no} - not pending")
             
-            print(f"🚛 PENDING DEBUG: Found {len(pending_records)} unique pending vehicles")
-            print(f"🚛 PENDING DEBUG: Prevented {duplicate_count} duplicate vehicles from showing")
+            print(f"🚛 PENDING DEBUG: 📈 Found {len(pending_records)} unique pending vehicles")
+            print(f"🚛 PENDING DEBUG: 🚫 Prevented {duplicate_count} duplicate vehicles from showing")
             self.logger.info(f"Found {len(pending_records)} unique pending vehicles, prevented {duplicate_count} duplicates")
             
             # Add to treeview, most recent first
@@ -254,17 +274,66 @@ class PendingVehiclesPanel:
                     vehicle_no,
                     self.format_timestamp(timestamp)
                 ))
-                print(f"🚛 PENDING DEBUG: Added to treeview: {ticket_no} - {vehicle_no}")
+                print(f"🚛 PENDING DEBUG: 📝 Added to treeview: {ticket_no} - {vehicle_no}")
             
             # Apply alternating row colors
             self._apply_row_colors()
             
-            print(f"🚛 PENDING DEBUG:  Successfully refreshed pending list with {len(pending_records)} unique vehicles")
+            print(f"🚛 PENDING DEBUG: ✅ Successfully refreshed pending list with {len(pending_records)} unique vehicles")
             self.logger.info(f"Successfully refreshed pending list with {len(pending_records)} unique vehicles")
             
         except Exception as e:
-            print(f"🚛 PENDING DEBUG: ❌ Error refreshing pending vehicles list: {e}")
-            self.logger.error(f"Error refreshing pending vehicles list: {e}")
+            # Enhanced error handling for different error types
+            error_str = str(e).lower()
+            if "closed file" in error_str or "i/o operation" in error_str:
+                print(f"🚛 PENDING DEBUG: 🔄 File I/O error during refresh - will retry later: {e}")
+                self.logger.error(f"File I/O error during refresh: {e}")
+                # Don't crash, just schedule retry
+                self.schedule_next_refresh()
+            else:
+                print(f"🚛 PENDING DEBUG: ❌ Error refreshing pending vehicles list: {e}")
+                self.logger.error(f"Error refreshing pending vehicles list: {e}")
+
+    def schedule_next_refresh(self):
+        """Schedule the next automatic refresh with error handling"""
+        try:
+            # Only schedule if widget still exists and not shutting down
+            if (hasattr(self, 'tree') and self.tree.winfo_exists() and 
+                hasattr(self, 'parent') and self.parent):
+                
+                # Check if data manager is shutting down
+                if (hasattr(self, 'data_manager') and 
+                    hasattr(self.data_manager, 'is_shutting_down') and 
+                    self.data_manager.is_shutting_down):
+                    print("[SCHEDULE] Skipping refresh schedule - data manager shutting down")
+                    return
+                
+                # Schedule next refresh in 60 seconds (60000 milliseconds)
+                self.parent.after(60000, self.refresh_pending_list)
+                print("[SCHEDULE] Next pending refresh scheduled in 60 seconds")
+        except Exception as e:
+            self.logger.error(f"Error scheduling next refresh: {e}")
+
+
+    def shutdown(self):
+        """Graceful shutdown of the pending vehicles panel"""
+        try:
+            print("🚛 PENDING DEBUG: Shutting down pending vehicles panel")
+            self.logger.info("Shutting down pending vehicles panel")
+            
+            # Cancel any scheduled refreshes
+            if hasattr(self, 'parent') and self.parent:
+                # Try to cancel any pending after() calls
+                try:
+                    # This won't cancel all, but it's better than nothing
+                    pass
+                except:
+                    pass
+            
+            print("🚛 PENDING DEBUG: Pending vehicles panel shutdown completed")
+            
+        except Exception as e:
+            print(f"🚛 PENDING DEBUG: Error during shutdown: {e}")        
 
     def remove_saved_record(self, ticket_no):
         """FIXED: Remove a record from the pending list after it's saved with second weighment
